@@ -393,6 +393,9 @@ func (app *App) registerAPIRoutes(router *gin.Engine) {
 		api.GET("/analysis-report", app.getAnalysisReport)
 		api.POST("/proxy/check", app.proxyCheckHandler)
 		api.POST("/proxy/check-github", app.checkGhProxyHandler)
+		api.GET("/groups", app.getGroupsHandler)
+		api.POST("/groups", app.saveGroupsHandler)
+		api.POST("/groups/toggle", app.toggleGroupHandler)
 		api.POST("/notify/test", app.notifyTestHandler)
 		api.POST("/substore/update", app.updateSubStoreHandler)
 
@@ -968,3 +971,111 @@ func (app *App) checkGhProxyHandler(c *gin.Context) {
 	result := utils.FindBestGhProxy(strings.TrimSpace(req.Proxy), true)
 	c.JSON(http.StatusOK, result)
 }
+
+
+// getGroupsHandler 获取当前所有分组配置与端口信息
+func (app *App) getGroupsHandler(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"groups":     config.GlobalConfig.Groups,
+		"apiKey":     config.GlobalConfig.APIKey,
+		"listenPort": config.GlobalConfig.ListenPort,
+	})
+}
+
+// saveGroupsHandler 全量更新分组列表并保存到配置文件
+func (app *App) saveGroupsHandler(c *gin.Context) {
+	var req struct {
+		Groups []config.GroupConfig `json:"groups"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误: " + err.Error()})
+		return
+	}
+
+	// 校验组名唯一性且非空
+	seen := make(map[string]bool)
+	for _, g := range req.Groups {
+		trimmed := strings.TrimSpace(g.Name)
+		if trimmed == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "组名不能为空"})
+			return
+		}
+		if seen[trimmed] {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "组名不能重复: " + trimmed})
+			return
+		}
+		seen[trimmed] = true
+	}
+
+	// 读取现有 yaml
+	data, err := os.ReadFile(app.configPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取配置文件失败: " + err.Error()})
+		return
+	}
+
+	config.GlobalConfig.Groups = req.Groups
+
+	var cfgMap map[string]interface{}
+	if err := yaml.Unmarshal(data, &cfgMap); err == nil {
+		cfgMap["groups"] = req.Groups
+		if out, err := yaml.Marshal(cfgMap); err == nil {
+			if err := os.WriteFile(app.configPath, out, 0o644); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "写回配置文件失败: " + err.Error()})
+				return
+			}
+		}
+	}
+
+	_ = app.loadConfig()
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "分组矩阵已成功保存并即时生效",
+		"groups":  config.GlobalConfig.Groups,
+	})
+}
+
+// toggleGroupHandler 切换单个分组的启用/禁用状态
+func (app *App) toggleGroupHandler(c *gin.Context) {
+	var req struct {
+		Name    string `json:"name"`
+		Enabled bool   `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "参数错误"})
+		return
+	}
+
+	found := false
+	for i := range config.GlobalConfig.Groups {
+		if config.GlobalConfig.Groups[i].Name == req.Name {
+			config.GlobalConfig.Groups[i].Enabled = &req.Enabled
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		c.JSON(http.StatusNotFound, gin.H{"error": "未找到指定分组: " + req.Name})
+		return
+	}
+
+	data, err := os.ReadFile(app.configPath)
+	if err == nil {
+		var cfgMap map[string]interface{}
+		if err := yaml.Unmarshal(data, &cfgMap); err == nil {
+			cfgMap["groups"] = config.GlobalConfig.Groups
+			if out, err := yaml.Marshal(cfgMap); err == nil {
+				_ = os.WriteFile(app.configPath, out, 0o644)
+			}
+		}
+	}
+	_ = app.loadConfig()
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "分组状态已切换",
+		"name":    req.Name,
+		"enabled": req.Enabled,
+	})
+}
+

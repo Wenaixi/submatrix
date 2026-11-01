@@ -3,6 +3,7 @@ package config
 // GroupConfig 代表用户在 config.yaml 的 groups 节点下定义的单组配置
 type GroupConfig struct {
 	Name               string   `yaml:"name"`
+	Enabled            *bool    `yaml:"enabled"`
 	DisplayName        string   `yaml:"display-name"`
 	Tag                string   `yaml:"tag"`
 	CheckAlive         *bool    `yaml:"check-alive"`
@@ -21,6 +22,7 @@ type GroupConfig struct {
 // ResolvedGroupConfig 级联继承全局配置后的最终可执行组配置
 type ResolvedGroupConfig struct {
 	Name               string
+	Enabled            bool
 	DisplayName        string
 	Tag                string
 	CheckAlive         bool
@@ -38,8 +40,13 @@ type ResolvedGroupConfig struct {
 
 // ResolveGroup 将单组配置与全局配置级联合并
 func ResolveGroup(g GroupConfig, global Config) ResolvedGroupConfig {
+	enabled := true
+	if g.Enabled != nil {
+		enabled = *g.Enabled
+	}
 	res := ResolvedGroupConfig{
 		Name:               g.Name,
+		Enabled:            enabled,
 		DisplayName:        g.DisplayName,
 		Tag:                g.Tag,
 		CheckAlive:         true,

@@ -33,7 +33,7 @@ const (
 	expireUnix int64 = 3389731200 // time.Date(2077,6,1,0,0,0,0,time.UTC).Unix()
 
 	planName = "Subs-Check-Pro"
-	appURL   = "https://github.com/sinspired/subs-check-pro"
+	appURL   = "https://github.com/Wenaixi/submatrix"
 )
 
 // registerSubscriptionInfoRoute 注册公共订阅信息路由（无需鉴权）。
