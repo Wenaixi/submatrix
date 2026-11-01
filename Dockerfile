@@ -7,7 +7,6 @@ RUN apt-get update -o Acquire::Check-Valid-Until=false \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
-ENV GOPROXY=https://goproxy.cn,direct
 ENV GOTOOLCHAIN=auto
 
 COPY go.mod go.sum ./
