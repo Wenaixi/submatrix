@@ -1,15 +1,18 @@
 package platform
 
 import (
-	"bytes"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 
 	"github.com/metacubex/mihomo/common/convert"
+	"github.com/sinspired/subs-check-pro/v3/utils"
 )
 
 func CheckIPRisk(httpClient *http.Client, ip string) (string, error) {
-	req, err := http.NewRequest("GET", fmt.Sprintf("https://scamalytics.com/ip/%s", ip), nil)
+	// TODO: 增加 "https://www.abuseipdb.com/check/${LOCAL_IP}"
+	req, err := http.NewRequest("GET", utils.JoinURL("https://scamalytics.com/ip", ip), nil)
 	if err != nil {
 		return "", err
 	}
@@ -22,48 +25,42 @@ func CheckIPRisk(httpClient *http.Client, ip string) (string, error) {
 
 	if resp.StatusCode == 200 {
 		// 读取响应内容
-		buf := getPooledBuf()
-		defer putPooledBuf(buf)
-		if _, err := buf.ReadFrom(resp.Body); err != nil {
+		limitReader := io.LimitReader(resp.Body, 64*1024)
+		body, err := io.ReadAll(limitReader)
+		if err != nil && err != io.EOF {
 			return "", err
 		}
-		body := buf.Bytes()
-		marker := []byte("IP Fraud Risk API")
-		apiIndex := bytes.Index(body, marker)
-		if apiIndex == -1 {
+		bodyStr := string(body)
+		_, after, ok := strings.Cut(bodyStr, "IP Fraud Risk API")
+		if !ok {
 			return "", fmt.Errorf("未找到IP Fraud Risk API")
 		}
 		// 从 "IP Fraud Risk API" 后的内容开始
-		contentAfterAPI := body[apiIndex+len(marker):]
+		contentAfterAPI := after
 		// 按行分割
-		lines := bytes.Split(contentAfterAPI, []byte("\n"))
+		lines := strings.Split(contentAfterAPI, "\n")
 
 		if len(lines) < 7 {
 			return "", fmt.Errorf("IP Fraud Risk API响应格式不正确")
 		}
-		var score, rist []byte
+		var score, rist string
 		{
-			score = bytes.TrimSpace(lines[4])
-			tmp := bytes.Split(score, []byte(":"))
-			if len(tmp) < 2 {
-				return "", fmt.Errorf("IP Fraud Risk API响应格式不正确")
-			}
-			score = bytes.ReplaceAll(tmp[1], []byte(`"`), nil)
-			score = bytes.ReplaceAll(score, []byte(","), nil)
+			score = strings.TrimSpace(lines[4])
+			tmp := strings.Split(score, ":")
+			score = strings.ReplaceAll(tmp[1], "\"", "")
+			score = strings.ReplaceAll(score, ",", "")
 
-			rist = bytes.TrimSpace(lines[5])
-			tmp = bytes.Split(rist, []byte(":"))
-			if len(tmp) < 2 {
-				return "", fmt.Errorf("IP Fraud Risk API响应格式不正确")
-			}
-			rist = bytes.ReplaceAll(tmp[1], []byte(`"`), nil)
-			rist = bytes.ReplaceAll(rist, []byte(","), nil)
+			rist = strings.TrimSpace(lines[5])
+			tmp = strings.Split(rist, ":")
+			rist = strings.ReplaceAll(tmp[1], "\"", "")
+			rist = strings.ReplaceAll(rist, ",", "")
 		}
 
-		if len(score) > 0 && len(rist) > 0 {
-			// return fmt.Sprintf("%s%% %s", score, rist), nil
-			return fmt.Sprintf("%s%%", score), nil
+		if score != "" && rist != "" {
+			// return score + "%" + " " + rist, nil   // 如果要同时输出 rist
+			return score + "%", nil
 		}
+
 	}
 	return "", nil
 }

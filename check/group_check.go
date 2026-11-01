@@ -4,25 +4,17 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/beck-8/subs-check/config"
 )
 
-// DeduplicateProxies 根据 server:port:type 物理特征去重
+// DeduplicateProxies 按 server:port:type 物理特征对节点列表去重
 func DeduplicateProxies(proxies []map[string]any) []map[string]any {
 	seen := make(map[string]struct{}, len(proxies))
 	res := make([]map[string]any, 0, len(proxies))
-
 	for _, p := range proxies {
-		server, _ := p["server"].(string)
+		server := fmt.Sprintf("%v", p["server"])
 		port := fmt.Sprintf("%v", p["port"])
-		pType, _ := p["type"].(string)
-
-		key := fmt.Sprintf("%s:%s:%s", strings.TrimSpace(server), strings.TrimSpace(port), strings.TrimSpace(pType))
-		if key == "::" {
-			// 没有基本连接信息的非法节点直接过滤
-			continue
-		}
-
+		typ := fmt.Sprintf("%v", p["type"])
+		key := strings.ToLower(fmt.Sprintf("%s:%s:%s", server, port, typ))
 		if _, exists := seen[key]; !exists {
 			seen[key] = struct{}{}
 			res = append(res, p)
@@ -31,83 +23,40 @@ func DeduplicateProxies(proxies []map[string]any) []map[string]any {
 	return res
 }
 
-// HandleFailedAliveNode 处理存活检测失败的节点
-// 若 DropOnFail 为 true，直接淘汰 (返回 nil)
-// 若 DropOnFail 为 false，不淘汰，标记为 [离线] 沉底保留
-func HandleFailedAliveNode(grp config.ResolvedGroupConfig, proxy map[string]any) *Result {
-	if grp.DropOnFail {
-		return nil
+// RenderOfflineNode 将测试失败但免淘汰的节点格式化为离线沉底节点
+func RenderOfflineNode(raw map[string]any, tag string) map[string]any {
+	clone := make(map[string]any, len(raw)+2)
+	for k, v := range raw {
+		clone[k] = v
 	}
-
-	origName := ""
-	if n, ok := proxy["name"].(string); ok {
-		origName = n
+	rawName, _ := clone["raw_name"].(string)
+	if rawName == "" {
+		rawName, _ = clone["name"].(string)
 	}
-
-	offlineName := RenderOfflineNode(origName, grp.Tag)
-
-	// 克隆 map 避免污染源数据
-	cloned := make(map[string]any, len(proxy)+2)
-	for k, v := range proxy {
-		cloned[k] = v
+	name := "[离线] " + rawName
+	if tag != "" {
+		name += "|" + tag
 	}
-	cloned["name"] = offlineName
-	cloned["offline"] = true
-
-	return &Result{
-		Proxy:   cloned,
-		Country: "",
-		IPType:  "",
-		Speed:   0,
-	}
+	clone["name"] = name
+	clone["offline"] = true
+	return clone
 }
 
-// ExecuteGroupProxies 按组上下文执行节点过滤与改名
-func ExecuteGroupProxies(grp config.ResolvedGroupConfig, rawProxies []map[string]any) ([]Result, error) {
-	deduped := DeduplicateProxies(rawProxies)
-
-	// 1. 若不测活 (透传聚合组/直通组)，直接装配结果并秒级返回
-	if !grp.CheckAlive {
-		results := make([]Result, 0, len(deduped))
-		for _, p := range deduped {
-			nodeMap := make(map[string]any, len(p))
-			for k, v := range p {
-				nodeMap[k] = v
-			}
-
-			// 如果组声明了 tag 且节点未带 sub_tag，补充组标签
-			if grp.Tag != "" {
-				if _, ok := nodeMap["sub_tag"]; !ok {
-					nodeMap["sub_tag"] = grp.Tag
-				}
-			}
-
-			results = append(results, Result{
-				Proxy:   nodeMap,
-				Country: "",
-				IPType:  "",
-				Speed:   0,
-			})
+// extractRootOriginalName 幂等提取最内层真正的原始节点名，防止聚合重入套娃
+func extractRootOriginalName(raw string) string {
+	const prefix = " (原名: "
+	raw = strings.TrimSpace(raw)
+	for {
+		start := strings.Index(raw, prefix)
+		if start == -1 {
+			break
 		}
-		return results, nil
+		end := strings.LastIndex(raw, ")")
+		if end > start+len(prefix) {
+			raw = strings.TrimSpace(raw[start+len(prefix) : end])
+		} else {
+			break
+		}
 	}
-
-	// 2. 测活组正常返回装配好的结果
-	results := make([]Result, 0, len(deduped))
-	for _, p := range deduped {
-		nodeMap := make(map[string]any, len(p))
-		for k, v := range p {
-			nodeMap[k] = v
-		}
-		if grp.Tag != "" {
-			if _, ok := nodeMap["sub_tag"]; !ok {
-				nodeMap["sub_tag"] = grp.Tag
-			}
-		}
-
-		results = append(results, Result{
-			Proxy: nodeMap,
-		})
-	}
-	return results, nil
+	return raw
 }

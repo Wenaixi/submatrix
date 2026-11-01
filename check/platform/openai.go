@@ -1,100 +1,60 @@
 package platform
 
 import (
-	"bytes"
+	"io"
 	"net/http"
-	"regexp"
+	"strings"
 )
 
-var openaiRe = regexp.MustCompile(`loc=([A-Z]{2})`)
-
-// OpenAIResult 表示 OpenAI 检测结果
-type OpenAIResult struct {
-	Full   bool   // 客户端可用（cookies+client双通过）
-	Web    bool   // 仅Web端可用（单项通过）
-	Region string // 地区码
+// CheckOpenAI 检测OpenAI可用性
+//
+// 1.如果全部通过，ChatGPT客户端可正常使用，res.Openai = true，tag为"GPT⁺"
+//
+// 2.如果只通过cookies检测 或 client检测，res.OpenaiWeb = true，tag为"GPT"
+//
+// 经在Windows和ios客户端测试，如果仅通过一项检测，客户端很大概率不能使用，但web端很大概率可以使用。所以如果全部通过添加了一个角标"⁺",保留仅通过一项检测的tag为"GPT",web端用户几乎不需要发现标签变化。
+func CheckOpenAI(httpClient *http.Client) (cookiesOK, clientOK bool, err error) {
+	cookiesOK, cookiesErr := CheckCookies(httpClient)
+	clientOK, clientErr := CheckClient(httpClient)
+	// 优先返回可重试的错误，让 withRetry 决定是否重试整体
+	if cookiesErr != nil {
+		return cookiesOK, clientOK, cookiesErr
+	}
+	return cookiesOK, clientOK, clientErr
 }
 
-// CheckOpenAI 检测 ChatGPT 解锁状态
-// 1. cookies+client 双通过 → GPT⁺-US
-// 2. 仅单项通过 → GPT-US
-// 3. 都不通过 → 无标签
-func CheckOpenAI(httpClient *http.Client) *OpenAIResult {
-	result := &OpenAIResult{}
-
-	cookiesOK := checkCookies(httpClient)
-	clientOK := checkClient(httpClient)
-
-	if cookiesOK && clientOK {
-		result.Full = true
-	} else if cookiesOK || clientOK {
-		result.Web = true
-	} else {
-		return result
-	}
-
-	result.Region = getOpenAIRegion(httpClient)
-	return result
-}
-
-// getOpenAIRegion 通过 Cloudflare cdn-cgi/trace 提取地区码
-func getOpenAIRegion(httpClient *http.Client) string {
-	req, err := http.NewRequest("GET", "https://chat.openai.com/cdn-cgi/trace", nil)
-	if err != nil {
-		return ""
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return ""
-	}
-	defer resp.Body.Close()
-
-	buf := getPooledBuf()
-	defer putPooledBuf(buf)
-	if _, err := buf.ReadFrom(resp.Body); err != nil {
-		return ""
-	}
-	body := buf.Bytes()
-
-	matches := openaiRe.FindSubmatch(body)
-	if len(matches) > 1 {
-		return string(matches[1])
-	}
-	return ""
-}
-
-// checkCookies 通过检查cookies判断网络访问
-func checkCookies(httpClient *http.Client) bool {
+// CheckCookies 通过检查cookies判断网络访问
+func CheckCookies(httpClient *http.Client) (bool, error) {
 	req, err := http.NewRequest("GET", "https://api.openai.com/compliance/cookie_requirements", nil)
 	if err != nil {
-		return false
+		return false, err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return false
+		return false, err // 网络错误透传，由 isRetryable 判断
 	}
 	defer resp.Body.Close()
 
-	buf := getPooledBuf()
-	defer putPooledBuf(buf)
-	if _, err := buf.ReadFrom(resp.Body); err != nil {
-		return false
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	if err != nil {
+		return false, err
 	}
-	body := buf.Bytes()
 
-	return !bytes.Contains(bytes.ToLower(body), []byte("unsupported_country"))
+	// 服务器明确返回 unsupported_country：有结论，不是错误
+	return !strings.Contains(strings.ToLower(string(body)), "unsupported_country"), nil
 }
 
-// checkClient 通过模拟客户端访问检查app可用性
-func checkClient(httpClient *http.Client) bool {
+// CheckClient 通过模拟客户端访问检查app可用性
+func CheckClient(httpClient *http.Client) (bool, error) {
+	// https://ios.chat.openai.com/public-api/mobile/server_status/v1
 	req, err := http.NewRequest("GET", "https://ios.chat.openai.com", nil)
 	if err != nil {
-		return false
+		return false, err
 	}
 
+	// 设置 移动设备 请求头
 	req.Header.Set("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6_0 like Mac OS X) AppleWebKit/537.36 (KHTML, like Gecko) Mobile/16G29 ChatGPT/3.0")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
@@ -107,22 +67,16 @@ func checkClient(httpClient *http.Client) bool {
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return false
+		return false, err
 	}
 	defer resp.Body.Close()
 
-	buf := getPooledBuf()
-	defer putPooledBuf(buf)
-	if _, err := buf.ReadFrom(resp.Body); err != nil {
-		return false
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	if err != nil {
+		return false, err
 	}
-	body := buf.Bytes()
 
-	bodyLower := bytes.ToLower(body)
-	// "disallowed isp" 是部分ISP被ChatGPT专门屏蔽时返回的文案,不属于 unsupported_country/vpn
-	// 的范畴,旧逻辑只否定这两者会把这种情况误判为可用。
-	return !bytes.Contains(bodyLower, []byte("unsupported_country")) &&
-		!bytes.Contains(bodyLower, []byte("vpn")) &&
-		!bytes.Contains(bodyLower, []byte("disallowed isp")) &&
-		!bytes.Contains(bodyLower, []byte("sorry, you have been blocked"))
+	// 检查是否包含 "unsupported_country" 和 "vpn 关键词
+	lower := strings.ToLower(string(body))
+	return !strings.Contains(lower, "unsupported_country") && !strings.Contains(lower, "vpn"), nil
 }

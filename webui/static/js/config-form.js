@@ -1,0 +1,5109 @@
+/**
+ * config-form.js
+ *
+ * 双栏逻辑：
+ *   · 初始化时根据编辑器可用宽度自动决定是否开启双栏
+ *   · 首次开启双栏：左=tab[0]、右=tab[1]
+ *   · 点击双栏按钮：左=当前激活 tab，右=下一个 tab（循环）
+ *   · 双栏中点击已显示的 tab：清空该槽，等待用户选择替换项
+ *   · 双栏中点击未显示的 tab：填入空槽（或最近清空的槽）
+ *   · 关闭双栏：_lastTab 恢复为单栏激活值
+ *   · YAML 模式：自动退出双栏，模式切换按钮更新外观
+ *
+ * 模式切换按钮（#cfgModeToggle）：
+ *   · 单按钮设计，点击在表单/YAML 间切换
+ *   · 内部通过点击隐藏的 [data-mode] 按钮，保持与 admin.js 的兼容性
+ *   · MutationObserver 监听 editorContainer class 变化，同步按钮外观
+ */
+/**
+ * @typedef {Object} WindowWithSfetch
+ * @property {(input: RequestInfo, init?: RequestInit) => Promise<Response>} sfetch
+ */
+
+/** @type {Window & WindowWithSfetch} */
+const w = window;
+
+/* ═══════════════════════════ 模块级共享状态 ═══════════════════════════ */
+let _cfg = {};
+const _built = new Set();
+
+let _leftTab = null;
+let _rightTab = null;
+let _splitOn = false;
+let _pendingSlot = null;
+let _lastTab = null;
+let _resizeTimer = null;
+
+// 是否记住各 tab 的滚动位置（true = 记住，false = 每次回到顶部）
+let _rememberScroll = true;
+// 各 tab 滚动位置缓存，key = tabId，value = scrollTop
+const _scrollCache = new Map();
+
+
+/* ════════════════════════════════════════════════════════════
+   宽度计算
+════════════════════════════════════════════════════════════ */
+const SIDEBAR_W = 160;
+const LAYOUT_GAPS = 16;
+const MIN_PANEL_W_SHOW = 280;
+const MIN_PANEL_W_AUTO = 340;
+
+function _editorW() { return (window.innerWidth - SIDEBAR_W - LAYOUT_GAPS) / 2; }
+function _canShowSplitBtn() { return _editorW() >= MIN_PANEL_W_SHOW * 2; }
+function _canSplit() { return _editorW() >= MIN_PANEL_W_AUTO * 2; }
+
+/* ═══════════════════════════ 迷你字典 (用于配置项 Hover) ═══════════════════════════ */
+const MINI_PROTO_INFO = {
+  vless: { name: 'VLESS', desc: '当前跨境代理的首选协议，配合 REALITY 与 Vision 隐蔽性极高。', level: '极低', color: 'var(--success)' },
+  vmess: { name: 'VMess', desc: '经典协议，生态成熟，但原版易被探测，需依赖外层伪装。', level: '中高', color: 'var(--warning)' },
+  trojan: { name: 'Trojan', desc: '将流量完全伪装成常规 HTTPS 网页流量，融入正常背景。', level: '中等', color: 'var(--warning)' },
+  ss: { name: 'Shadowsocks', desc: '轻量级代理标准，裸协议易被封，搭配新型插件隐蔽性极佳。', level: '极高 / 极低', color: 'var(--danger)' },
+  ssr: { name: 'ShadowsocksR', desc: '早期添加混淆的分支协议，特征已被审查系统完全掌握。', level: '极高', color: 'var(--danger)' },
+  hysteria2: { name: 'Hysteria 2', desc: '基于 QUIC，抗丢包极强，弱网提速明显，但易被 UDP QoS。', level: '中等', color: 'var(--warning)' },
+  hysteria: { name: 'Hysteria (v1)', desc: '第一代多路复用协议，伪装弱，建议服务端升级 v2。', level: '高', color: 'var(--danger)' },
+  tuic: { name: 'TUIC', desc: '基于 QUIC，主打 0-RTT 极速握手，非常依赖底层 UDP 质量。', level: '中等', color: 'var(--warning)' },
+  masque: { name: 'Masque', desc: '基于 HTTP/3 标准的代理协议，深度无缝伪装，潜力新星。', level: '低', color: 'var(--success)' },
+  shadowquic: { name: 'ShadowQUIC', desc: '结合 SS 思想与 QUIC 传输层的代理协议，生态较小众。', level: '中等', color: 'var(--warning)' },
+  wireguard: { name: 'WireGuard', desc: '现代 VPN 标准，明文特征明显，绝对不能用于跨境直连。', level: '致命', color: 'var(--danger)' },
+  tailscale: { name: 'Tailscale', desc: '零信任 Mesh VPN，用于内网互联，跨境大流量极易被阻断。', level: '致命', color: 'var(--danger)' },
+  openvpn: { name: 'OpenVPN', desc: '传统企业 VPN，握手特征太明显，已被审查系统彻底识别。', level: '必封', color: 'var(--danger)' },
+  snell: { name: 'Snell', desc: 'Surge 团队闭源协议，极简高效，适合 IPLC 专线等私有网络使用。', level: '较高', color: 'var(--danger)' },
+  'gost-relay': { name: 'GOST Relay', desc: '用于构建多级代理链路的隧道转发协议，非直连翻墙首选。', level: '中高', color: 'var(--warning)' },
+  mieru: { name: 'Mieru', desc: '专注于抗主动探测的现代代理协议，强混淆防深度包嗅探。', level: '较低', color: 'var(--success)' },
+  sudoku: { name: 'Sudoku', desc: '结合 HTTPMask 的新型防封协议，支持非对称的纯下行伪装。', level: '低', color: 'var(--success)' },
+  anytls: { name: 'AnyTLS', desc: '专注于任意 TLS 版本层伪装的小众隧道协议，适配各种指纹。', level: '较低', color: 'var(--success)' },
+  ssh: { name: 'SSH', desc: '老牌系统远程终端与转发协议，明文握手极易被识别封锁。', level: '必封', color: 'var(--danger)' },
+  http: { name: 'HTTP', desc: '最古老的标准代理协议，无隐蔽抗审查能力，仅限局域网分发。', level: '必封', color: 'var(--danger)' },
+  https: { name: 'HTTPS', desc: 'HTTP 协议，但加上了 tls，有一定争议，不稳定。', level: '较高', color: 'var(--warning)' },
+  socks5: { name: 'Socks5', desc: '网络层标准代理，不加密无混淆，绝对不可暴露在公网用于跨境。', level: '必封', color: 'var(--danger)' },
+  trusttunnel: { name: 'TrustTunnel', desc: '小众高性能隧道协议，支持底层复用。', level: '未知', color: 'var(--muted)' }
+};
+
+const MINI_PLATFORM_INFO = {
+  iprisk: { name: 'IPRisk', desc: '检测节点 IP 的欺诈风险度与纯净度，标记高危节点。', tag: 'IP 分析', color: 'var(--unlock-iprisk, #f97316)' },
+  openai: { name: 'OpenAI (ChatGPT)', desc: '检测节点是否原生解锁 ChatGPT 网页版及 API 服务。', tag: 'AI 服务', color: 'var(--unlock-openai, #10a37f)' },
+  gemini: { name: 'Google Gemini', desc: '检测节点是否支持 Google Gemini / Workspace AI 服务。', tag: 'AI 服务', color: 'var(--unlock-gemini, #47be0c)' },
+  copilot: { name: 'Microsoft Copilot', desc: '检测节点是否解锁微软 Copilot / New Bing 服务。', tag: 'AI 服务', color: 'var(--unlock-copilot, #a84ddf)' },
+  youtube: { name: 'YouTube', desc: '检测 YouTube 播放连接，以及 Premium 会员的区域归属地。', tag: '流媒体', color: 'var(--unlock-youtube, #ff0000)' },
+  tiktok: { name: 'TikTok', desc: '检测国际版 TikTok 的可访问性，并提取其对应的归属区域。', tag: '短视频', color: 'var(--unlock-tiktok, #00b881)' },
+  netflix: { name: 'Netflix', desc: '检测奈飞全剧集（包含非自制版权剧）的区域解锁情况。', tag: '流媒体', color: 'var(--unlock-netflix, #e50914)' },
+  disney: { name: 'Disney+', desc: '检测 Disney+ (迪士尼+) 流媒体平台的访问与区域解锁状态。', tag: '流媒体', color: 'var(--unlock-disney, #113ccf)' },
+  x: { name: 'X (Twitter)', desc: '检测 X 平台的连通性，适用于特定免流或限制较多的区域。', tag: '社交媒体', color: '#1d9bf0' }
+};
+
+const MINI_GENERIC_INFO = {
+  'enhanced-tag': {
+    title: '位置标签',
+    tagLabel: '配置',
+    tagVal: 'enhanced-tag',
+    color: 'var(--accent, #3b82f6)',
+    desc: `
+<div class="mtt-tag-list">
+  <div class="mtt-tag-title">IP 风险</div>
+  <div class="mtt-tag-item"><span class="mtt-badge-danger">0%</span>IP欺诈评分，越低越好</div>
+  <div class="mtt-tag-title">CF 节点</div>
+  <div class="mtt-tag-item"><span class="mtt-badge-danger">HK⁻¹</span>无法访问 CF 自身</div>
+  <div class="mtt-tag-item"><span class="mtt-badge-success">HK¹⁺</span>出口与 CDN 位置一致</div>
+  <div class="mtt-tag-item"><span class="mtt-badge-info">HK¹-US⁰</span>出口与 CDN 位置不同</div>
+</div>
+
+<div class="mtt-tag-list">
+  <div class="mtt-tag-title">VPS 节点</div>
+  <div class="mtt-tag-item"><span class="mtt-badge-purple">HK²</span>VPS 节点，使用 ² 角标</div>
+</div>
+
+<div class="mtt-tag-list">
+  <div class="mtt-tag-title">其他</div>
+  <div class="mtt-tag-item"><span class="mtt-badge-orange">YT-CN</span>媒体解锁位置</div>
+  <div class="mtt-tag-item"><span class="mtt-badge-muted">HKˣ</span>未获取到位置</div>
+</div>
+<div class="mtt-tag-note">
+  * 前两位字母是实际浏览网站识别的位置，<span class="mtt-badge-muted" style="min-width:auto;padding:0 4px;">-US⁰</span> 为使用 <span class="mtt-badge-muted" style="min-width:auto;padding:0 4px;">CF CDN</span> 服务的网站识别的位置 (如 GPT, Claude, X 等)。
+</div>
+</div>`
+  },
+  'traffic-info': {
+    title: '流量信息',
+    tagLabel: '配置',
+    tagVal: 'traffic-info',
+    color: 'var(--accent, #3b82f6)',
+    desc: `
+<div class="mtt-tag-list traffic-card">
+  <div class="mtt-tag-title">流量信息示例</div>
+
+  <div class="mtt-tag-item mtt-traffic-inline">
+    ♾️ 05-20 13:14 | 9.99 GB | 9 点重置 | [🏴‍☠️]
+  </div>
+</div>
+
+<div class="mtt-tag-note">
+      * 流量信息按订阅实时更新，请在 订阅管理 内详细设置。
+    </div>
+`},
+  'notify-title': {
+    title: '通知',
+    tagLabel: '配置',
+    tagVal: 'notify-title',
+    color: 'var(--accent, #3b82f6)',
+    desc: () => {
+      // 从 DOM 读取用户输入
+      const inp = document.querySelector('input[data-key="notify-title"], textarea[data-key="notify-title"]');
+      let val = inp ? inp.value.trim() : '';
+      if (!val) val = '🔔 节点状态更新';
+
+      // 简单防 XSS 注入
+      val = val.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+      return `
+<div class="mtt-tag-list traffic-card">
+  <div class="mtt-traffic-inline" style="display: block; line-height: 1.6; padding: 2px 0;">
+    <div style="font-weight: 700; color: color-mix(in srgb, var(--fg) 90%, transparent); margin-bottom: 2px;">${val}</div>
+    <div style="color: color-mix(in srgb, var(--fg) 85%, transparent);">✅ 可用节点：520</div>
+    <div style="color: color-mix(in srgb, var(--fg) 85%, transparent);">📊 消耗流量：13.14 GB</div>
+    <div style="color: color-mix(in srgb, var(--fg) 85%, transparent);">🕒 2099-05-20 13:14:99</div>
+  </div>
+</div>
+<div class="mtt-tag-note">
+  * 此为模拟通知预览，实际数值由检测结果动态决定。
+</div>`;
+    }
+  },
+  'threshold': {
+    title: '智能乱序',
+    tagLabel: '配置',
+    tagVal: 'threshold',
+    color: 'var(--success, #22c55e)',
+    desc: `
+<div class="mtt-tag-list">
+  <div class="mtt-tag-title">工作原理</div>
+  <div class="mtt-tag-item" style="font-size: 11px; line-height: 1.5; align-items: flex-start;">
+    基于节点 IP (CIDR 网段) 或域名的层级相似度，强制分散同网段或同主域名的节点，降低因集中检测而触发阻断的风险。
+  </div>
+</div>
+
+<div class="mtt-tag-list">
+  <div class="mtt-tag-title">阈值映射</div>
+  <div class="mtt-tag-item"><span class="mtt-badge-muted" style="min-width: 45px">1.00</span>散开同 IP / 域名</div>
+  <div class="mtt-tag-item"><span class="mtt-badge-success" style="min-width: 45px">0.75</span>散开同 C 段 / 主域名</div>
+  <div class="mtt-tag-item"><span class="mtt-badge-info" style="min-width: 45px">0.50</span>散开同 B 段 / 二级域</div>
+  <div class="mtt-tag-item"><span class="mtt-badge-orange" style="min-width: 45px">0.25</span>散开同 A 段 / 顶级域</div>
+</div>
+
+<div class="mtt-tag-note">
+  * 数字越小，顺序越乱，触发阻断风险减小
+</div>`
+  },
+};
+
+function getMiniProtoInfo(name) {
+  const key = name.toLowerCase().replace(/[^a-z0-9\-]/g, '');
+  if (key === 'hy2' || key === 'hysteria2') return MINI_PROTO_INFO['hysteria2'];
+  if (key === 'hy') return MINI_PROTO_INFO['hysteria'];
+  if (key === 'wg') return MINI_PROTO_INFO['wireguard'];
+  if (key === 'gost') return MINI_PROTO_INFO['gost-relay'];
+  return MINI_PROTO_INFO[key] || {
+    name: name.toUpperCase(), desc: 'Mihomo 社区支持的常规代理扩展协议。', level: '未知', color: 'var(--muted)'
+  };
+}
+
+function getMiniPlatformInfo(name) {
+  const key = name.toLowerCase().trim();
+  return MINI_PLATFORM_INFO[key] || {
+    name: name.toUpperCase(), desc: '常规流媒体或平台解锁检测。', tag: '平台检测', color: 'var(--muted)'
+  };
+}
+
+// 触摸设备判定：没有真正 hover 能力，或主输入是粗指针(手指)
+const _isTouchDevice = window.matchMedia && window.matchMedia('(hover: none), (pointer: coarse)').matches;
+
+let _miniTooltipEl = null;
+let _miniTooltipOpenChip = null; // 触摸端记录当前是哪个胶囊打开了说明，用于再次点击时关闭
+
+// 长按呼出相关状态
+let _chipLongPressTimer = null;
+let _chipLongPressStart = { x: 0, y: 0 };
+let _chipLongPressFiredAt = 0;
+const CHIP_LONG_PRESS_MS = 500;
+const CHIP_LONG_PRESS_MOVE_TOLERANCE = 10;
+
+function _getMiniTooltipContent(el) {
+  const protoChip = el.matches('[data-proto-mini]') ? el : null;
+  const platformChip = !protoChip && el.matches('[data-platform-mini]') ? el : null;
+  const genInfo = !protoChip && !platformChip && el.matches('[data-info-mini]') ? el : null;
+
+  if (!protoChip && !platformChip && !genInfo) return null;
+
+  if (protoChip) {
+    const info = getMiniProtoInfo(protoChip.dataset.protoMini);
+    return { title: info.name, tagLabel: '封锁概率', tagVal: info.level, desc: info.desc, color: info.color };
+  }
+  if (platformChip) {
+    const info = getMiniPlatformInfo(platformChip.dataset.platformMini);
+    return { title: info.name, tagLabel: '分类', tagVal: info.tag, desc: info.desc, color: info.color };
+  }
+  if (genInfo) {
+    const info = MINI_GENERIC_INFO[genInfo.dataset.infoMini];
+    if (!info) return null;
+
+    // 若为函数则动态生成内容
+    const descContent = typeof info.desc === 'function' ? info.desc() : info.desc;
+    return { title: info.title, tagLabel: info.tagLabel, tagVal: info.tagVal, desc: descContent, color: info.color };
+  }
+}
+
+function _renderMiniTooltip(tooltip, content) {
+  tooltip.style.setProperty('--badge-color', content.color);
+  tooltip.innerHTML = `
+        <div class="mtt-header">
+            <div class="mtt-title">${content.title}</div>
+            <div class="mtt-badge">${content.tagLabel}: ${content.tagVal}</div>
+        </div>
+        <div class="mtt-desc">${content.desc}</div>
+    `;
+}
+
+function _positionMiniTooltipAboveChip(chip, tooltip) {
+  const gap = 8;
+  const margin = 8;
+  const chipRect = chip.getBoundingClientRect();
+  const rect = tooltip.getBoundingClientRect();
+
+  let left = chipRect.left + chipRect.width / 2 - rect.width / 2;
+  left = Math.max(margin, Math.min(left, window.innerWidth - rect.width - margin));
+
+  // 优先放在胶囊上方，贴着胶囊上边框留个小间距；上面空间不够再放下方
+  let top = chipRect.top - gap - rect.height;
+  if (top < margin) {
+    top = chipRect.bottom + gap;
+  }
+  // 兜底夹紧：上下都放不下时（胶囊贴着屏幕边缘），至少保证卡片完整可见
+  top = Math.max(margin, Math.min(top, window.innerHeight - rect.height - margin));
+
+  tooltip.style.left = `${left}px`;
+  tooltip.style.top = `${top}px`;
+}
+
+// 供触摸端 info 图标调用：再次点同一个胶囊的图标则关闭，否则切换内容并展开
+function toggleMiniTooltipFor(el) {
+  if (!_miniTooltipEl) return;
+  const content = _getMiniTooltipContent(el);
+  if (!content) return;
+
+  if (_miniTooltipOpenChip === el && _miniTooltipEl.classList.contains('visible')) {
+    _miniTooltipEl.classList.remove('visible');
+    _miniTooltipOpenChip = null;
+    return;
+  }
+
+  _renderMiniTooltip(_miniTooltipEl, content);
+  _positionMiniTooltipAboveChip(el, _miniTooltipEl);
+  _miniTooltipEl.classList.add('visible');
+  _miniTooltipOpenChip = el;
+}
+
+function initMiniHoverTooltip() {
+  let tooltip = document.getElementById('miniHoverTooltip');
+  if (!tooltip) {
+    tooltip = el('div', { id: 'miniHoverTooltip' });
+    document.body.appendChild(tooltip);
+  }
+  _miniTooltipEl = tooltip;
+
+  const MINI_TARGET_SELECTOR = '.cfg-chip[data-proto-mini], .cfg-chip[data-platform-mini], [data-info-mini]';
+
+  // 桌面端：整个胶囊 hover 即可预览，触摸端没有真正的 hover，
+  // 这里直接跳过，避免触摸模拟出的 mouseover 把提示卡死在屏幕上
+  document.body.addEventListener('mouseover', (e) => {
+    if (_isTouchDevice) return;
+    const target = e.target.closest(MINI_TARGET_SELECTOR);
+    if (!target) return;
+
+    const content = _getMiniTooltipContent(target);
+    if (!content) return;
+    _renderMiniTooltip(tooltip, content);
+    tooltip.classList.add('visible');
+  });
+
+  document.body.addEventListener('mousemove', (e) => {
+    if (_isTouchDevice) return;
+    if (!tooltip.classList.contains('visible')) return;
+
+    const margin = 8;
+    const x = e.clientX, y = e.clientY;
+    const rect = tooltip.getBoundingClientRect();
+
+    let left = x + 12;
+    let top = y + 12;
+    if (left + rect.width > window.innerWidth) left = x - rect.width - 12;
+    if (top + rect.height > window.innerHeight) top = y - rect.height - 12;
+
+    // 翻转之后再统一夹紧一次：窄屏下卡片本身可能比"翻转后剩下的空间"还宽，
+    // 单纯翻转仍会出屏，这里保证无论如何都完整落在视口内
+    left = Math.max(margin, Math.min(left, window.innerWidth - rect.width - margin));
+    top = Math.max(margin, Math.min(top, window.innerHeight - rect.height - margin));
+
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
+  });
+
+  document.body.addEventListener('mouseout', (e) => {
+    if (_isTouchDevice) return;
+    if (!e.target.closest(MINI_TARGET_SELECTOR)) return;
+    tooltip.classList.remove('visible');
+  });
+
+  // 触摸端：点胶囊以外的地方关闭说明（点 info 图标本身走 toggleMiniTooltipFor，不会被这里误关）
+  document.addEventListener('touchstart', (e) => {
+    if (tooltip.classList.contains('visible') && !e.target.closest('.cfg-chip') && !e.target.closest('[data-info-mini]') && !e.target.closest('#miniHoverTooltip')) {
+      tooltip.classList.remove('visible');
+      _miniTooltipOpenChip = null;
+    }
+  }, { passive: true });
+
+  // 触摸端：整个胶囊长按也能呼出说明，不必非要点那个小图标；
+  // 短按（正常 tap）不受影响，依旧是选中/取消选中
+  if (_isTouchDevice) {
+    document.body.addEventListener('touchstart', (e) => {
+      const chip = e.target.closest('.cfg-chip[data-proto-mini], .cfg-chip[data-platform-mini]');
+      if (!chip || e.target.closest('.cfg-chip-info')) return; // 图标已有自己的点击逻辑
+
+      const t = e.touches[0];
+      _chipLongPressStart = { x: t.clientX, y: t.clientY };
+      clearTimeout(_chipLongPressTimer);
+      _chipLongPressTimer = setTimeout(() => {
+        _chipLongPressTimer = null;
+        _chipLongPressFiredAt = Date.now();
+        toggleMiniTooltipFor(chip);
+      }, CHIP_LONG_PRESS_MS);
+    }, { passive: true });
+
+    document.body.addEventListener('touchmove', (e) => {
+      if (!_chipLongPressTimer) return;
+      const t = e.touches[0];
+      if (Math.abs(t.clientX - _chipLongPressStart.x) > CHIP_LONG_PRESS_MOVE_TOLERANCE ||
+        Math.abs(t.clientY - _chipLongPressStart.y) > CHIP_LONG_PRESS_MOVE_TOLERANCE) {
+        clearTimeout(_chipLongPressTimer);
+        _chipLongPressTimer = null;
+      }
+    }, { passive: true });
+
+    document.body.addEventListener('touchend', () => {
+      clearTimeout(_chipLongPressTimer);
+      _chipLongPressTimer = null;
+    }, { passive: true });
+
+    document.body.addEventListener('touchcancel', () => {
+      clearTimeout(_chipLongPressTimer);
+      _chipLongPressTimer = null;
+    }, { passive: true });
+
+    // 长按已经弹出说明，紧接着这次 touchend 触发的 click（label 默认的选中/取消选中）要拦掉，
+    // 不然长按松手还是会顺带切一次选中状态
+    document.body.addEventListener('click', (e) => {
+      if (Date.now() - _chipLongPressFiredAt > 600) return;
+      const chip = e.target.closest('.cfg-chip[data-proto-mini], .cfg-chip[data-platform-mini]');
+      if (!chip) return;
+      e.preventDefault();
+      e.stopPropagation();
+    });
+  }
+}
+
+const SCHEMA = [
+  /* ── 1. 任务 ──────────────────── */
+  {
+    tab: 'schedule',
+    sections: [
+      {
+        title: '检测计划',
+        fields: [
+          {
+            key: 'cron-expression', label: 'Cron 表达式', type: 'cron', fullWidth: true,
+            placeholder: '0 4 */2 * *',
+            hint: '优先级高于检测间隔；推荐隔两天的凌晨 4 点执行',
+            hintExamples: ['0 4 */2 * *'],
+            links: [
+              { label: 'Cron 语法文档', href: 'https://crontab.guru/examples.html', icon: 'docs' },
+              { label: '在线测试', href: 'https://crontab.guru', icon: 'link' },
+            ],
+          },
+          { key: 'check-interval', label: '检测间隔 (分钟)', type: 'number', min: 1, placeholder: '2880', hint: 'Cron 为空时生效；建议 > 2880' },
+        ],
+      },
+      {
+        title: '代理设置',
+        fields: [
+          {
+            key: 'system-proxy', label: '系统代理', type: 'text', fullWidth: true,
+            placeholder: 'http://127.0.0.1:10808',
+            hint: '用于拉取订阅和推送通知；direct = 强制直连不使用代理；留空则自动检测。',
+          },
+          {
+            key: 'github-proxy', label: 'GitHub 代理', type: 'text', fullWidth: true,
+            placeholder: 'https://ghfast.top/',
+            hint: '加速 GitHub Release 下载；建议配置',
+            links: [
+              { label: '自建 CF 代理', href: 'https://github.com/sinspired/CF-Proxy', icon: 'github' },
+              { label: '申请免费域名', href: 'https://dashboard.digitalplat.org/signup?ref=HZcosTVlmQ', icon: 'link' }
+            ],
+          },
+          { key: 'ghproxy-group', label: 'GitHub 代理列表', type: 'url-list', hint: '程序自动筛选可用代理，优先级低于 github-proxy' },
+        ],
+      },
+    ],
+  },
+
+  /* ── 2. 订阅 ────────────────────────────── */
+  {
+    tab: 'subscriptions',
+    sections: [
+      {
+        title: '拉取基准',
+        fields: [
+          {
+            key: 'concurrent',
+            label: '基准并发',
+            type: 'number', min: 1, max: 100, placeholder: '20',
+            hint: '拉取订阅的并发数；并作为自动并发的计算基准',
+            default: 20,
+          },
+          {
+            key: 'github-token', label: ' GitHub 密钥', type: 'password', fullWidth: true, placeholder: 'GITHUB_TOKEN', hint: '用来提高订阅拉取成功率，提升 GitHub 速率限制',
+            links: [
+              { label: '查看文档', href: 'https://docs.github.com/zh/actions/concepts/security/github_token', icon: 'github' },
+              { label: '创建密钥', href: 'https://github.com/settings/personal-access-tokens', icon: 'github' }],
+          },
+        ],
+      },
+      {
+        title: '内存管理',
+        fields: [
+          {
+            key: 'subs-parse-batch',
+            label: '解析批次',
+            type: 'number', min: 0, max: 100000, placeholder: '3000', default: 3000,
+            hint: '解析到该数量节点后进入一次去重队列，小内存设备建议 500–3000'
+          },
+          {
+            key: 'subs-dedupe-batch',
+            label: '去重阈值',
+            type: 'number', min: 0, max: 500000, placeholder: '100000', default: 100000,
+            hint: '获取到该数量的节点就进行一次去重，释放内存'
+          },
+          {
+            key: 'memory-limit-mb',
+            label: '内存上限 (MB)',
+            type: 'number', min: 0, max: 102400, placeholder: '0',
+            hint: '运行时软内存上限；0 = 自动',
+          },
+          {
+            key: 'gc-percent',
+            label: 'GC 阈值',
+            type: 'number', min: 0, max: 1000, placeholder: '70',
+            hint: '值越小，内存回收越频繁，CPU 占用越高；0 = 100',
+          },
+        ],
+      },
+      {
+        title: '拉取参数',
+        fields: [
+          { key: 'sub-urls-retry', label: '重试次数', type: 'number', min: 1, max: 5, placeholder: '3', hint: '获取订阅失败重试次数', default: 3, },
+          { key: 'sub-urls-timeout', label: '下载超时 (s)', type: 'number', min: 5, max: 30, placeholder: '10', hint: '建议 10–60', default: 10, },
+          { key: 'sub-url-max-size-mb', label: '订阅大小上限 (MB/s)', type: 'number', min: 0, max: 500, placeholder: '50', hint: '建议 1–100', default: 50, },
+          {
+            key: 'success-rate', label: '成功率提醒阈值 (‰)', type: 'number', min: 0.01, max: 1000, placeholder: '0', hint: '低于此值将打印成功率信息，并写入统计文件',
+            hintExamples: [
+              "subs-filter.yaml"
+            ]
+          },
+        ],
+      },
+      {
+        title: '订阅处理',
+        fields: [
+          {
+            key: 'threshold', label: '节点乱序', type: 'select', numericOptions: true,
+            selectWidth: '500px',
+            hint: '按网段和域名智能乱序，数值越小顺序越乱',
+            options: [
+              { value: '1.00', label: '1.00 - 全域名 - CIDR /32' },
+              { value: '0.75', label: '0.75 - 主域名 - CIDR /24' },
+              { value: '0.50', label: '0.50 - 二级域 - CIDR /16' },
+              { value: '0.25', label: '0.25 - 顶级域 - CIDR /8' },
+            ],
+            default: 0.75,
+            links: [{ label: '机制说明', miniInfo: 'threshold', icon: 'docs' }],
+          },
+        ],
+      },
+      {
+        title: '远程订阅清单',
+        fields: [
+          {
+            key: 'sub-urls-remote', label: '远程订阅列表', type: 'url-list',
+            hint: '集中维护订阅源，支持 txt / yaml / json；支持 mihomo proxy-providers 格式',
+          },
+        ],
+      },
+      {
+        title: '本地订阅地址',
+        fields: [
+          {
+            key: 'sub-urls', label: '订阅地址', type: 'url-list',
+            hint: '支持 Clash / V2Ray / Base64；末尾 #备注 可添加标签；支持 {Ymd} 日期占位符',
+          },
+        ],
+      },
+    ],
+  },
+
+  /* ── 3. 检测 ────────────────────────────────── */
+  {
+    tab: 'detection',
+    sections: [
+      {
+        title: '并发控制',
+        fields: [
+          {
+            key: 'net-guard', label: '网络拥塞保护', type: 'toggle', default: false, hint: '检测时探测网络拥堵情况，将自动调整并发参数'
+          },
+          { key: 'alive-concurrent', label: '测活并发', type: 'number', min: 0, max: 1000, placeholder: '200', hint: '0 = 自动；建议 10–300', default: 100, },
+          { key: 'speed-concurrent', label: '测速并发', type: 'number', min: 0, max: 64, placeholder: '8', hint: '0 = 自动；建议 4–32', default: 8, },
+          { key: 'media-concurrent', label: '媒体并发', type: 'number', min: 0, max: 200, placeholder: '50', hint: '0 = 自动；建议 10–200', default: 16, },
+        ],
+      },
+      {
+        title: '节点要求',
+        fields: [
+          { key: 'success-limit', label: '节点数量上限', type: 'number', min: 0, placeholder: '200', hint: '0 = 不限制，建议 100-200', default: 100, },
+        ],
+      },
+      {
+        title: '延迟参数',
+        fields: [
+          { key: 'timeout', label: '超时时间 (ms)', type: 'number', min: 1000, max: 15000, placeholder: '6000', hint: '节点延迟上限，建议 3000–10000', default: 6000, },
+        ],
+      },
+      {
+        title: '测速参数',
+        fields: [
+          {
+            key: 'speed-test-url', label: '测速地址', type: 'text', fullWidth: true,
+            placeholder: 'random',
+            hint: "random = 内置测速池随机轮询；留空关闭测速；支持自定义测速 URL",
+          },
+          { key: 'min-speed', label: '最低速度 (KB/s)', type: 'number', min: 0, placeholder: '128', hint: '低于此值的节点将被丢弃，0 = 不过滤', default: 128, },
+          { key: 'download-timeout', label: '下载超时 (s)', type: 'number', min: 0, max: 30, placeholder: '10', hint: '测速单节点超时，建议 10s', default: 10, },
+          { key: 'download-mb', label: '单节点上限 (MB)', type: 'number', min: 0, max: 100, placeholder: '20', default: 20, hint: '每节点最大下载量，0 = 不限', default: 20, },
+          { key: 'total-speed-limit', label: '总带宽 (MB/s)', type: 'number', min: 0, max: 2000, placeholder: '0', hint: '全局测速带宽上限，0 = 不限' },
+        ],
+      },
+      {
+        title: '解锁检测',
+        fields: [
+          {
+            key: 'media-check', label: '流媒体检测', type: 'toggle', hint: '检测流媒体和 AI 服务解锁情况'
+          },
+          { key: 'media-check-timeout', label: '检测超时 (s)', type: 'number', min: 0, max: 30, placeholder: '10', hint: '流媒体、AI解锁检测超时，建议 5-10s', default: 10, },
+          {
+            key: 'platforms', label: '检测平台', type: 'chips',
+            options: ['iprisk', 'openai', 'gemini', 'copilot', 'youtube', 'tiktok', 'netflix', 'disney', 'x'],
+            hint: '根据解锁情况添加节点标签:',
+            hintExamples: [
+              "iprisk: 0%",
+              "openai: GPT", "gemini: GM", "copilot: CP", "Youtube: YT", "tiktok: TK", "netflix: NF", "Disney: D+", "X: Twitter"
+            ],
+            default: ['iprisk', 'openai', 'gemini', 'youtube'],
+          },
+        ],
+      },
+      {
+        title: '功能开关',
+        fields: [
+          { key: 'use-last-result', label: '加载上次检测结果', type: 'toggle', hint: '加载 all.yaml 作为订阅', default: false, },
+          { key: 'use-history-result', label: '加载并保存历史检测结果', type: 'toggle', hint: '加载 history.yaml 作为订阅', default: false, },
+          { key: 'rename-node', label: '重命名节点', type: 'toggle', hint: '根据节点 IP 归属地自动重命名', default: true, },
+          {
+            key: 'enhanced-tag', label: '增强位置标签', type: 'toggle', hint: '添加 KR¹-US⁰，SG² 类角标', default: true,
+            links: [{ label: '标签说明', miniInfo: 'enhanced-tag', icon: 'docs' }],
+          },
+          { key: 'drop-bad-cf-nodes', label: '丢弃 CF 不可达', type: 'toggle', hint: '可能误杀，谨慎开启', default: false, },
+          { key: 'ipv6', label: '启用 IPv6', type: 'toggle', hint: '建议关闭', default: false, },
+        ],
+      },
+      {
+        title: '协议筛选',
+        fields: [
+          {
+            key: 'node-type',
+            label: '协议筛选',
+            type: 'chips',
+            hint: '留空=全部；推荐：VLESS / VMess / Trojan；谨慎：SS/SSR；不建议：Hysteria2 / TUIC；不稳定：HTTP / Socks5；实验性：openvpn',
+            options: [
+              'vmess',        // VMess
+              'vless',        // VLESS
+              'trojan',       // Trojan
+              'snell',        // Snell
+              'ss',           // Shadowsocks
+              'ssr',          // ShadowsocksR (兼容)
+              'gost-relay',   // GOST Relay
+              'hysteria',     // Hysteria
+              'hysteria2',    // Hysteria2
+              'tuic',         // TUIC
+              'wireguard',    // WireGuard
+              'ssh',          // SSH
+              'mieru',        // Mieru
+              'anytls',       // AnyTLS
+              'sudoku',       // Sudoku
+              'masque',       // MASQUE
+              'trusttunnel',   // TrustTunnel
+              'socks5',       // SOCKS5
+              'http',         // HTTP
+              'https',         // HTTPs
+              'openvpn',      // OpenVPN
+            ]
+          }
+        ]
+      },
+      {
+        title: '位置筛选',
+        fields: [
+          {
+            key: 'node-loc',
+            label: '地理位置',
+            type: 'url-list',
+            placeholder: 'US',
+            hint: '根据节点归属地进行筛选，留空=全部；支持两位代码（CN、US）',
+          }
+        ]
+      },
+      {
+        title: 'DNS 配置',
+        fields: [
+          {
+            key: 'nameserver', label: '主要 DNS', type: 'url-list',
+            placeholder: 'https://dns.alidns.com/dns-query',
+            hint: '基础 DNS，影响直连和兜底解析，留空表示使用默认解析'
+          },
+          {
+            key: 'proxy-server-nameserver', label: '节点 DNS', type: 'url-list',
+            placeholder: 'https://doh.pub/dns-query',
+            hint: '用于解析所有节点域名的 DNS，非必要配置项，如果不填则遵循 nameserver-policy、nameserver 的配置'
+          },
+          {
+            key: 'proxy-server-nameserver-policy', label: '节点 DNS 策略', type: 'url-list',
+            placeholder: '+.node.example.org: https://dns.alidns.com/dns-query',
+            hint: '为特定节点域名指定 DNS，仅当 proxy-server-nameserver 不为空时生效。[ 域名: DNS地址 ]',
+            hintExamples: [
+              "+.google.cn: 8.8.8.8"
+            ]
+          },
+        ],
+      },
+      {
+        title: 'ISP 检测',
+        fields: [
+          { key: 'isp-check', label: 'ISP 类型检测', type: 'toggle', hint: '比如: [原生|住宅]、[广播|机房]等' },
+          { key: 'isp-timeout', label: 'ISP 检测超时 (秒)', type: 'number', min: 1, max: 15, placeholder: '5', default: 5, hint: '最高 15s' },
+          {
+            key: 'isp-check-api-key-ipapi', label: 'ipapi.is API', type: 'password', fullWidth: true, placeholder: 'IPAPI_TOKEN', hint: '免费额度：注册后每天 1000 次',
+            links: [
+              { label: '申请免费 API Key', href: 'https://ipapi.is/app/', icon: 'apikey' }],
+          },
+          {
+            key: 'isp-check-api-key-proxycheck', label: 'proxycheck.io API', type: 'password', fullWidth: true, placeholder: 'PROXYCHECK_TOKEN', hint: '免费额度：每天 1000 次（另有约 5 倍的突发令牌可用）',
+            links: [{ label: '申请免费 API Key', href: 'https://proxycheck.io/dashboard/', icon: 'apikey' }],
+          },
+          {
+            key: 'isp-check-api-key-iplocate', label: 'iplocate.io API', type: 'password', fullWidth: true, placeholder: 'IPLOCATE_TOKEN', hint: '免费额度：每天 1000 次，免费版与付费版字段完全一致',
+            links: [{ label: '申请免费 API Key', href: 'https://www.iplocate.io/account', icon: 'apikey' }],
+          },
+          {
+            key: 'isp-check-api-key-ipdata', label: 'ipdata.co API', type: 'password', fullWidth: true, placeholder: 'IPDATA_TOKEN', hint: '免费额度：每天 1500 次（或每月 45000 次）',
+            links: [{ label: '申请免费 API Key', href: 'https://dashboard.ipdata.co/', icon: 'apikey' }],
+          },
+        ],
+      },
+    ],
+  },
+
+  /* ── 4. 存储 ─────────────────────────────────────────── */
+  {
+    tab: 'storage',
+    sections: [
+      {
+        title: '存储方式',
+        fields: [
+          {
+            key: 'save-method', label: '存储方式', type: 'select', hint: '支持上传 webdav，GitHub gist，R2，s3',
+            selectWidth: '500px',
+            options: [
+              { value: 'local', label: '本地 (local)' },
+              { value: 'webdav', label: 'WebDAV' },
+              { value: 'gist', label: 'GitHub Gist' },
+              { value: 'r2', label: 'R2 存储' },
+              { value: 's3', label: 'S3 / MinIO' },
+            ],
+          },
+          {
+            key: 'output-dir',
+            label: '本地存储目录',
+            type: 'text',
+            placeholder: '/data/output',
+            hint: '留空 = 程序目录 /output',
+            links: [{ label: '内置文件服务', href: '/files', icon: 'files' }],
+          },
+        ],
+      },
+
+      {
+        title: 'WebDAV',
+        conditional: 'webdav',
+        fields: [
+          {
+            key: 'webdav-url',
+            label: 'WebDAV 地址',
+            type: 'text',
+            fullWidth: true,
+            placeholder: 'https://dav.example.com/remote.php/dav/files/user/',
+            hint: 'WebDAV 是一种基于 HTTP 的文件管理协议，允许用户通过网络远程访问、上传、下载和管理服务器上的文件。',
+          },
+          {
+            key: 'webdav-username',
+            label: '用户名',
+            type: 'text',
+            placeholder: 'admin',
+            hint: 'Webdav 账号',
+          },
+          {
+            key: 'webdav-password',
+            label: '密码',
+            type: 'password',
+            placeholder: '输入密码',
+            hint: 'Webdav 密码，支持应用专用密码',
+          },
+        ],
+      },
+
+      {
+        title: 'GitHub Gist',
+        conditional: 'gist',
+        fields: [
+          {
+            key: 'github-gist-id',
+            label: 'Gist ID',
+            type: 'text',
+            placeholder: 'a1b2c3d4e5f6...',
+            fullWidth: true,
+            hint: 'Gist 提供了一种与他人共享代码片段的简单方法，机密 Gist 不会显示在 发现 中，也无法被搜索',
+            links: [
+              {
+                label: '创建 Gist',
+                href: 'https://gist.github.com/',
+                icon: 'github',
+              },
+            ],
+          },
+          {
+            key: 'github-token',
+            label: 'GitHub Token',
+            type: 'password',
+            fullWidth: true,
+            placeholder: 'GITHUB_TOKEN',
+            hint: '需具备 Gist 权限，同时将用于提高订阅拉取成功率，提升 GitHub 速率限制',
+            links: [
+              {
+                label: '创建 Token',
+                href: 'https://github.com/settings/personal-access-tokens',
+                icon: 'github',
+              },
+            ],
+          },
+          {
+            key: 'github-api-mirror',
+            label: 'API 镜像',
+            type: 'text',
+            placeholder: 'https://api.github.com/',
+            hint: '可选，自行搭建可用的镜像地址',
+          },
+        ],
+      },
+
+      {
+        title: 'CF R2 存储',
+        conditional: 'r2',
+        fields: [
+          {
+            key: 'worker-url',
+            label: 'Worker 地址',
+            type: 'text',
+            placeholder: 'https://example.worker.dev',
+            hint: '将检测结果推送到 Cloudflare Worker 的 R2 存储',
+            links: [
+              {
+                label: 'R2 文档',
+                href: 'https://developers.cloudflare.com/r2/',
+                icon: 'link',
+              },
+              {
+                label: '申请免费域名',
+                href: 'https://dashboard.digitalplat.org/signup?ref=HZcosTVlmQ',
+                icon: 'link'
+              },
+            ],
+          },
+          {
+            key: 'worker-token',
+            label: 'Worker 令牌',
+            type: 'password',
+            placeholder: '1234567890',
+            hint: '与 Worker 配置一致',
+          },
+        ],
+      },
+
+      {
+        title: 'S3 / MinIO',
+        conditional: 's3',
+        fields: [
+          {
+            key: 's3-endpoint',
+            label: 'Endpoint',
+            type: 'text',
+            placeholder: '127.0.0.1:9000',
+            hint: 'S3 服务地址：兼容 Amazon S3 的对象存储服务，如 MinIO、Cloudflare R2、阿里云 OSS 等',
+          },
+          {
+            key: 's3-access-id',
+            label: 'Access Key ID',
+            type: 'text',
+            placeholder: 'minioadmin',
+          },
+          {
+            key: 's3-secret-key',
+            label: 'Secret Key',
+            type: 'password',
+            placeholder: '输入密钥',
+          },
+          {
+            key: 's3-bucket',
+            label: 'Bucket',
+            type: 'text',
+            placeholder: 'subs-check',
+            hint: '存储桶名称',
+          },
+          {
+            key: 's3-use-ssl',
+            label: '使用 SSL',
+            type: 'toggle',
+            hint: '启用 HTTPS',
+          },
+          {
+            key: 's3-bucket-lookup',
+            label: 'Bucket 寻址',
+            type: 'select',
+            hint: '推荐自动',
+            options: [
+              { value: 'auto', label: '自动 (auto)' },
+              { value: 'path', label: 'Path 寻址' },
+              { value: 'dns', label: 'DNS 寻址' },
+            ],
+          },
+        ],
+      },
+      {
+        title: '节点标签',
+        fields: [
+          { key: 'node-prefix', label: '节点前缀', type: 'text', placeholder: 'Ubuntu-', hint: '依赖"检测 - 重命名节点"开关' },
+        ],
+      },
+      {
+        title: '覆写规则 (Sub-Store)',
+        fields: [
+          {
+            key: 'mihomo-overwrite-url',
+            label: 'Mihomo 覆写 URL',
+            type: 'text',
+            fullWidth: true,
+            get placeholder() {
+              const port = (typeof _getLiveVal === 'function' ? String(_getLiveVal('listen-port', ':8199')) : String(_cfg?.['listen-port'] || ':8199')).replace(/^.*:/, '') || '8199';
+              return `http://127.0.0.1:${port}/Mihomo-Rules-CDN.yaml`;
+            },
+            get default() { return this.placeholder; },
+            hint: '用于生成带指定规则的 mihomo/clash.meta 订阅链接，包含分组、分流等；自定义规则使用内置文件服务',
+            links: [{ label: '内置文件服务', href: '/files', icon: 'files' }],
+          },
+        ],
+      },
+      {
+        title: '订阅筛选 (Sub-Store)',
+        fields: [
+          {
+            key: 'sub-process.regex-filter-keep',
+            label: '筛选模式',
+            type: 'select',
+            default: true,
+            hint: '白名单=仅保留匹配节点；黑名单=丢弃匹配节点',
+            options: [
+              { value: 'true', label: '白名单丨保留模式' },
+              { value: 'false', label: '黑名单丨过滤模式' },
+            ],
+          },
+          {
+            key: 'sub-process.regex-filter',
+            label: '正则筛选',
+            type: 'url-list',
+            placeholder: '正则表达式',
+            hint: '每行一条正则，模式由上方"筛选模式"决定；留空不筛选',
+            hintExamples: [
+              '(.*GPT⁺.*)(.*GM.*)',
+              '.*\\bUS[¹²]\\b.*',
+            ],
+          },
+        ],
+      },
+      {
+        title: '订阅排序 (Sub-Store)',
+        fields: [
+          {
+            key: 'sub-process.regex-sort', label: '正则排序', type: 'url-list',
+            placeholder: '正则表达式',
+            hint: '按优先级填写正则表达式，匹配的节点排在前面；留空不排序',
+            hintExamples: [
+              '.*\\bSG[¹²]\\b.*',
+              '(.*GPT⁺.*)(.*GM.*)',
+              '.*GPT⁺.*',
+              '.*\\bYT\\b(?!-CN).*',
+            ],
+          },
+        ],
+      },
+      {
+        title: '订阅操作 (Sub-Store)',
+        fields: [
+          {
+            key: 'sub-process.sub-info', label: '注入流量信息节点', type: 'toggle',
+            hint: '在订阅开头注入剩余流量、更新时间虚拟节点',
+            links: [
+              { label: '脚本示例', href: 'https://raw.githubusercontent.com/sinspired/sub-store-scripts/refs/heads/main/surge/modules/sub-store-scripts/sub-info/node.js', icon: 'jsFile' },
+              { label: '流量信息', miniInfo: 'traffic-info', icon: 'docs' }
+            ],
+          },
+          {
+            key: 'sub-process.node-split', label: '节点裂变', type: 'toggle',
+            hint: '通过 DNS 解析，每个IP 裂变为一个节点',
+          },
+        ],
+      },
+      {
+        title: 'DNS 解析 (Sub-Store)',
+        fields: [
+          {
+            key: 'sub-process.resolve-domain.enable',
+            label: '启用 DNS 解析',
+            type: 'toggle',
+            default: false,
+            hint: '解析节点域名为 IP',
+          },
+          {
+            key: 'sub-process.resolve-domain.provider',
+            label: 'DNS 提供商',
+            hint: '可由节点字段 "_no-resolve" 控制',
+            type: 'select',
+            default: 'Ali',
+            options: [
+              { value: 'Ali', label: '阿里' },
+              { value: 'Tencent', label: '腾讯' },
+              { value: 'Cloudflare', label: 'Cloudflare' },
+              { value: 'Google', label: 'Google' },
+              { value: 'Custom', label: '自定义' },
+            ],
+          },
+          {
+            key: 'sub-process.resolve-domain.custom-url',
+            label: '自定义 DNS URL',
+            type: 'text',
+            fullWidth: true,
+            placeholder: 'https://1.1.1.1/dns-query',
+            hint: '当提供商选择自定义时必填，支持 DoH 等格式。',
+          },
+          {
+            key: 'sub-process.resolve-domain.edns',
+            label: 'EDNS 设置',
+            type: 'text',
+            placeholder: '请输入纯 IP，默认为 223.6.6.6',
+            hint: 'EDNS(Google, Ali, Tencent, 自定义 DNS 会携带此参数, 可能会影响解析结果)',
+          },
+          {
+            key: 'sub-process.resolve-domain.concurrency',
+            label: 'DNS 请求并发数',
+            hint: '影响 DNS 解析速度和资源占用',
+            type: 'number',
+            min: 1,
+            max: 100,
+            default: 10,
+          },
+          {
+            key: 'sub-process.resolve-domain.timeout',
+            label: 'DNS 超时 (毫秒)',
+            hint: '单次 DNS 请求的最大等待时间',
+            type: 'number',
+            min: 3000,
+            max: 30000,
+            default: 8000,
+          },
+          {
+            key: 'sub-process.resolve-domain.type',
+            label: '解析类型',
+            type: 'select',
+            default: 'IPv4',
+            hint: '选择使用 IPv4 或 IPv6 进行域名解析，IPv6 兼容 IP4P ',
+            options: [
+              { value: 'IPv4', label: 'IPv4' },
+              { value: 'IPv6', label: 'IPv6' },
+            ],
+          },
+          {
+            key: 'sub-process.resolve-domain.cache',
+            label: '缓存策略',
+            hint: '是否启用 DNS 解析结果缓存',
+            type: 'select',
+            default: 'enabled',
+            options: [
+              { value: 'enabled', label: '启用' },
+              { value: 'disabled', label: '禁用' },
+            ],
+          },
+          {
+            key: 'sub-process.resolve-domain.cache-ttl',
+            label: '缓存时长 (秒)',
+            hint: 'DNS 解析结果的缓存时长，默认 3600 秒（1 小时）',
+            type: 'number',
+            min: 0,
+            default: 3600,
+          },
+        ],
+      },
+    ],
+  },
+
+  /* ── 5. 通知 ─────────────────────────────────────────── */
+  {
+    tab: 'notify',
+    sections: [
+      {
+        title: 'Apprise 通知',
+        fields: [
+          {
+            key: 'apprise-api-server', label: 'Apprise API 地址', type: 'text', fullWidth: true,
+            placeholder: 'https://apprise.example.com/notify',
+            hint: '填写搭建的apprise API server 地址，配置后可向 100+ 渠道发送通知',
+            links: [
+              { label: '部署通知服务', href: 'https://github.com/sinspired/apprise_vercel', icon: 'github' },
+              { label: '申请免费域名', href: 'https://dashboard.digitalplat.org/signup?ref=HZcosTVlmQ', icon: 'link' }],
+          },
+          {
+            key: 'recipient-url', label: '通知渠道', type: 'url-list',
+            placeholder: 'schema://',
+            hint: '支持 100+ 通知渠道，覆盖版本更新、节点状态和内置数据库更新通知，建议配置！',
+            hintExamples: [
+              "tgram://",
+              "bark://",
+              "mailto://",
+              "ntfy://",
+              "dingtalk://",
+            ],
+            links: [{ label: '渠道配置文档', href: 'https://apprise.linkpc.dpdns.org/docs/QuicSet', icon: 'docs' }],
+          },
+          {
+            key: 'notify-title', label: '通知标题', type: 'text', fullWidth: true, placeholder: '🔔 节点状态更新',
+            hint: '自定义检测完成后发送可用节点数量的通知标题',
+            default: '🔔 节点状态更新',
+            links: [
+              { label: '通知预览', miniInfo: 'notify-title', icon: 'docs' }
+            ],
+          },
+        ],
+      },
+    ],
+  },
+
+  /* ── 6. 高级 ─────────────────────────────────────────── */
+  {
+    tab: 'advanced',
+    sections: [
+      {
+        title: '终端显示',
+        fields: [
+          { key: 'print-progress', label: '终端显示进度', type: 'toggle' },
+          {
+            key: 'progress-mode', label: '进度条模式', type: 'select', hint: '分阶段 = 当前阶段进度完成后显示下一阶段进度',
+            selectWidth: '500px',
+            options: [
+              { value: 'auto', label: '自动 (auto)' },
+              { value: 'stage', label: '分阶段 (stage)' },
+            ],
+          },
+        ],
+      },
+      {
+        title: 'WebUI',
+        fields: [
+          { key: 'listen-port', label: '监听端口', type: 'text', placeholder: ':8199', default: ':8199', hint: '监听端口，用于 WebUI，直接返回节点信息等' },
+          { key: 'enable-web-ui', label: '启用 Web 控制面板', type: 'toggle' },
+          { key: 'api-key', label: 'API 密钥', type: 'password', placeholder: '留空自动生成', hint: '留空则启动时自动生成，需在终端查看' },
+          {
+            key: 'share-password', label: '分享密码', type: 'password', placeholder: '输入密码', hint: '访问 /sub/{password}/all.yaml 分享订阅',
+            links: [{ label: '加密分享', href: '/share', icon: 'files' }],
+          },
+        ],
+      },
+      {
+        title: '自动更新',
+        fields: [
+          { key: 'update', label: '自动更新', type: 'toggle', default: true, hint: '关闭时仅提醒新版本' },
+          { key: 'update-on-startup', label: '启动时检查更新', type: 'toggle' },
+          { key: 'prerelease', label: '使用预发布版本', type: 'toggle', hint: '包含 beta / rc 版本' },
+          { key: 'cron-check-update', label: '检查更新 Cron', type: 'cron', fullWidth: true, placeholder: '0 9,21 * * *', default: '0 0,9,21 * * *', hint: '# 定时检查版本更新' },
+          { key: 'update-timeout', label: '下载超时 (分钟)', type: 'number', min: 1, placeholder: '2', hint: '下载更新文件的最大时间，如更新失败或网络环境恶劣，可适当调大' },
+        ],
+      },
+      {
+        title: '内存优化',
+        fields: [
+          {
+            key: 'gc-threshold', label: '主动内存回收阈值', type: 'number', min: 10000, placeholder: '50000', default: 20000,
+            hint: '每处理一定数量节点立即降低内存'
+          },
+        ],
+      },
+      {
+        title: 'Sub-Store',
+        fields: [
+          { key: 'sub-store-update-cron', label: '定时更新任务', type: 'cron', placeholder: '14 13 * * 5', default: '14 13 * * 5', hint: 'Sub-Store 前后端资源自动更新任务' },
+          { key: 'sub-store-update-notify', label: 'Sub-Store 更新通知', type: 'toggle', fullWidth: false, default: true, hint: 'Sub-Store 前后端资源更新通知开关' },
+          { key: 'sub-store-port', label: '监听端口', type: 'text', placeholder: ':8299', hint: 'Sub-Store 的启动端口，为空则不启动sub-store' },
+          { key: 'sub-store-path', label: '访问路径', type: 'text', placeholder: '/sub-store-path', hint: '建议设置以避免泄露；留空自动生成随机路径' },
+          { key: 'sub-store-sync-cron', label: '定时同步 Gist', type: 'cron', fullWidth: true, placeholder: '55 5-23/2 * * *', hint: '定时将订阅/文件上传到私有 Gist. 在前端, 叫做 同步 或 同步配置.', },
+          {
+            key: 'sub-store-produce-cron', label: '定时缓存订阅', type: 'produce-cron', fullWidth: true, placeholder: '0 */2 * * *,sub,sub_A',
+            hint: '定时处理单条订阅 sub_A；定时处理组合订阅 col_B。示例',
+            hintExamples: [
+              "0 */2 * * *,sub,sub_A;0 */3 * * *,col,col_B"
+            ],
+          },
+          {
+            key: 'sub-store-push-service', label: 'Push 推送服务', type: 'text', fullWidth: true, placeholder: 'apprise',
+            hint: '填入 apprise 可直接使用通知渠道，支持部分 shoutrrr-ts URL 和 apprise URL，在拉取失败时发送通知。示例',
+            hintExamples: [
+              "tgram://",
+              "bark://",
+              "mailto://",
+              "ntfy://",
+              "dingtalk://",
+              "https://api.day.app/XXXXXXXXXXXX/[推送标题]/[推送内容]",
+            ],
+            links: [
+              { label: 'shoutrrr-ts 配置文档', href: 'https://github.com/Delusions6515/shoutrrr-ts', icon: 'docs' },
+              { label: 'Apprise 配置文档', href: 'https://apprise.linkpc.dpdns.org/docs/QuicSet', icon: 'docs' },
+            ],
+          },
+        ],
+      },
+      {
+        title: 'Singbox 规则',
+        fields: [
+          {
+            key: 'singbox-latest.version', label: '最新版本号', type: 'text',
+            placeholder: '1.14',
+            hint: 'singbox 最新版，Android / Windows 客户端首选',
+          },
+          {
+            key: 'singbox-latest.json', label: '最新版规则 JSON', type: 'text', fullWidth: true,
+            placeholder: 'https://raw.githubusercontent.com/sinspired/sub-store-template/main/1.14.x/sing-box.json',
+            hint: '分流规则文件地址，留空使用内置默认值',
+            links: [{ label: '查看模板仓库', href: 'https://github.com/sinspired/sub-store-template', icon: 'github' }],
+          },
+          {
+            key: 'singbox-latest.js', label: '最新版处理脚本', type: 'text', fullWidth: true,
+            placeholder: 'https://raw.githubusercontent.com/sinspired/sub-store-template/main/1.14.x/sing-box.js',
+            hint: '节点处理脚本地址，留空使用内置默认值',
+          },
+          {
+            key: 'singbox-extra.version', label: 'Extra 版本号', type: 'text',
+            placeholder: '1.15-pre',
+            hint: 'sing-box 各版本配置不兼容',
+          },
+          {
+            key: 'singbox-extra.json', label: 'Extra 规则 JSON', type: 'text', fullWidth: true,
+            placeholder: 'https://raw.githubusercontent.com/sinspired/sub-store-template/main/1.15.x/sing-box.json',
+          },
+          {
+            key: 'singbox-extra.js', label: 'Extra 处理脚本', type: 'text', fullWidth: true,
+            placeholder: 'https://raw.githubusercontent.com/sinspired/sub-store-template/main/1.15.x/sing-box.js',
+          },
+        ],
+      },
+      {
+        title: '其他',
+        fields: [
+          { key: 'maxmind-db-path', label: 'MaxMind DB 路径', type: 'text', fullWidth: true, placeholder: '/data/GeoLite2-City.mmdb', hint: '留空则使用内置数据库' },
+          { key: 'maxmind-db-update-notify', label: 'MaxMind DB 更新通知', type: 'toggle', fullWidth: false, hint: 'MaxMind 地理数据库每周自动更新通知开关' },
+          { key: 'callback-script', label: '回调脚本路径', type: 'text', fullWidth: true, placeholder: '/data/scripts/notify.sh', hint: '检测完成后执行的回调脚本路径', },
+        ],
+      },
+    ],
+  },
+];
+
+/* ═══════════════════════════ 字段校验规则 ═══════════════════════════ */
+const FIELD_VALIDATORS = {
+  // ── 并发与限制 ──
+  'concurrent': v => {
+    if (!_anyAutoMode()) return null;
+    const n = Number(v);
+    const { alive, speed, media } = _estimateAuto();
+    if (n > 100) return { level: 'warn', msg: `并发 ${n} 过高，将影响拉取订阅成功率` };
+    return { level: 'info', msg: `自动模式基准 ${n} → 测活 ≈ ${alive} · 测速 ≈ ${speed} · 媒体 ≈ ${media}` };
+  },
+  'subs-parse-batch': v => {
+    const n = Number(v);
+    if (!n || n <= 0) return { level: 'info', msg: '0 = 使用默认值 5000' };
+
+    const concurrent = Math.max(1, _getLiveVal('concurrent', 20));
+    const peak = concurrent * n * 2;
+    const peakStr = peak.toLocaleString();
+
+    if (n < 1000) {
+      return { level: 'info', msg: `批次偏小，去重队列切换频繁；按并发 ${concurrent} 估算瞬时约 ${peakStr} 个节点` };
+    }
+    if (peak > 1_000_000) {
+      return { level: 'warn', msg: `瞬时约 ${peakStr} 个节点（并发 ${concurrent}），过高；建议调小批次或降低并发` };
+    }
+    if (peak > 300_000) {
+      return { level: 'warn', msg: `瞬时约 ${peakStr} 个节点（并发 ${concurrent}）` };
+    }
+    return { level: 'ok', msg: `批次合理，瞬时约 ${peakStr} 个节点（并发 ${concurrent}）` };
+  },
+  'subs-dedupe-batch': v => {
+    const n = Number(v);
+    if (!n || n <= 0) {
+      return { level: 'warn', msg: '0 = 禁用分段释放，所有订阅处理完才释放，订阅量大时内存会持续上涨' };
+    }
+    if (n < 20000) {
+      return { level: 'warn', msg: `阈值 ${n} 偏低，释放过于频繁，会增加 CPU 开销` };
+    }
+    if (n <= 500000) {
+      return { level: 'ok', msg: `阈值 ${n}，每处理到该数量时释放一次内存` };
+    }
+    return { level: 'warn', msg: `阈值 ${n} 较高，释放间隔变长，请关注内存占用` };
+  },
+
+  'alive-concurrent': v => {
+    const n = Number(v);
+    if (n === 0 || _anyAutoMode()) {
+      const { alive, base } = _estimateAuto();
+      return { level: 'ok', msg: `自适应模式（基准 =${base}）· 测活 ≈ ${alive}` };
+    }
+    if (n > 1000) return { level: 'warn', msg: `并发 ${n} 过高，易影响正常上网，建议 100–300` };
+    if (n > 500) return { level: 'warn', msg: `并发 ${n} 过高，超出多数路由器处理能力，建议 100–300` };
+    if (n > 300) return { level: 'info', msg: `并发 ${n} 偏高，请确认机器性能` };
+    return null;
+  },
+
+  'speed-concurrent': v => {
+    const n = Number(v);
+    if (n === 0 || _anyAutoMode()) {
+      const { speed, base } = _estimateAuto();
+      return { level: 'ok', msg: `自适应模式（基准 =${base}）· 测速 ≈ ${speed}` };
+    }
+    if (n > 32) return { level: 'warn', msg: `并发 ${n} 较高，测速会占用大量带宽，建议配合 total-speed-limit` };
+    return null;
+  },
+
+  'media-concurrent': v => {
+    const n = Number(v);
+    if (n === 0 || _anyAutoMode()) {
+      const { media, base } = _estimateAuto();
+      return { level: 'ok', msg: `自适应模式（基准 =${base}）· 媒体 ≈ ${media}` };
+    }
+    if (n > 200) return { level: 'warn', msg: `并发 ${n} 较高，建议不超过 200` };
+    if (n > 0 && n <= 100) return { level: 'info', msg: `并发 ${n} 合理` };
+    return null;
+  },
+
+  // ── 时间与数值限制 ──
+  'timeout': v => {
+    const n = Number(v);
+
+    if (n <= 3000) {
+      return {
+        level: 'warn',
+        msg: `超时 ${n}ms 过短，可能导致无可用节点，请确保带宽足够优质`
+      };
+    }
+
+    if (n < 5000) {
+      return {
+        level: 'info',
+        msg: `${n}ms 超时，如可用节点急剧减少，请调大该值`
+      };
+    }
+
+    if (n > 15000) {
+      return {
+        level: 'info',
+        msg: `超时 ${n}ms 较长，检测耗时会明显增加`
+      };
+    }
+
+    return null;
+  },
+
+
+  'isp-timeout': v => {
+    const n = Number(v);
+    if (n < 0) return { level: 'warn', msg: '超时时间必须大于 0' };
+    if (n === 0) return { level: 'info', msg: '超时时间默认为 5 秒' };
+    if (n > 15) return { level: 'warn', msg: 'ISP 检测超时不会超过 15s' };
+    return null;
+  },
+
+  'isp-check': v => {
+    if (!v) return null; // 关闭时不显示任何额外提示
+
+    // 检查所有 API Key 字段是否至少有一个有值
+    const keys = [
+      'isp-check-api-key-ipapi',
+      'isp-check-api-key-proxycheck',
+      'isp-check-api-key-iplocate',
+      'isp-check-api-key-ipdata'
+    ];
+    const hasKey = keys.some(k => !!String(_getLiveVal(k, '')).trim());
+
+    if (!hasKey) {
+      return { level: 'warn', msg: '请提供至少一个 API Key，否则 ISP 检测不会生效' };
+    }
+    return { level: 'ok', msg: '已提供 API Key，ISP 检测就绪' };
+  },
+
+  'check-interval': v => {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0) return null;
+
+    const hours = Math.round(n / 60);
+
+    if (n === 0) return { level: 'info', msg: `默认间隔 2880 分钟（48h）` };
+
+    if (n < 120) {
+      return { level: 'warn', msg: `间隔 ${n} 分钟过于频繁，易触发运营商阻断，建议 ≥ 2880` };
+    }
+    if (n < 360) {
+      return { level: 'info', msg: `间隔 ${n} 分钟（约 ${hours} 小时），如开启下载测速，建议调大` };
+    }
+    if (n < 720) {
+      return { level: 'warn', msg: `间隔 ${n} 分钟（约 ${hours} 小时），一天多测，注意运营商 Qos` };
+    }
+    if (n < 1440) {
+      return { level: 'warn', msg: `间隔 ${n} 分钟（约 ${hours} 小时），两天三测` };
+    }
+    if (n < 2880) {
+      return { level: 'info', msg: `间隔 ${n} 分钟（约 ${hours} 小时），一天一测，如可用节点减少，调到 2880` };
+    }
+    if (n >= 2880) {
+      return { level: 'ok', msg: `间隔 ${n} 分钟（约 ${hours} 小时），频率合理` };
+    }
+
+    return null;
+  },
+
+  'min-speed': v => { const n = Number(v); if (n === 0) return { level: 'info', msg: '未设置最低速度' }; if (n > 2000) return { level: 'warn', msg: `${n} KB/s 偏高，建议 ≤ 500` }; return null; },
+  'download-timeout': v => { if (Number(v) === 0) return { level: 'warn', msg: '未设置，极慢节点会阻塞测速队列，建议设为 10s' }; if (Number(v) > 15) return { level: 'warn', msg: '下载超时不宜设置过高，节点易被测死' }; return null; },
+  'download-mb': v => { if (Number(v) === 0) return { level: 'info', msg: '未限制单节点下载量，高并发时可能消耗大量流量，建议 20 MB' }; if (Number(v) >= 100) return { level: 'warn', msg: '过大的下载量将对代理节点造成较大压力，建议 20 MB' }; return null; },
+  'success-limit': v => { const n = Number(v); if (n > 0 && n < 5) return { level: 'info', msg: `保存上限 ${n} 较少，建议 100-200` }; if (n >= 100 && n < 200) return { level: 'info', msg: `保存上限 ${n}，视手机性能，mihomo 类 VPN 超过 100 个节点会增加分组切换压力` }; if (n > 200) return { level: 'warn', msg: `保存上限 ${n} 较多，建议不超过 200` }; return null; },
+  'media-check-timeout': v => { if (Number(v) === 0) return { level: 'warn', msg: '未设置，默认为 10s' }; if (Number(v) < 5) return { level: 'warn', msg: '媒体解锁超时太小，可能无法获取结果' }; if (Number(v) > 15) return { level: 'warn', msg: '媒体解锁检测超时太高，建议 5-15 秒' }; return null; },
+
+  'gc-threshold': v => { const n = Number(v); if (n === 0) return { level: 'info', msg: `默认阈值 20000` }; if (n > 0 && n < 10000) return { level: 'warn', msg: `阈值 ${n}太低，将导致频繁内存回收，增加 CPU 压力` }; if (n >= 10000 && n <= 100000) return { level: 'info', msg: `阈值 ${n} 适合中等数量订阅池` }; if (n > 100000) return { level: 'warn', msg: `阈值 ${n} 较高，请关注运行时内存占用` }; return null; },
+
+  'memory-limit-mb': v => {
+    const n = Number(v);
+    if (!n || n <= 0) return { level: 'info', msg: '0 = 自动：Docker 取 cgroup 限制 ×75%，物理机取系统内存 ×75%' };
+    if (n < 256) return { level: 'warn', msg: `${n} MB 过小，极易触发 OOM，建议至少 512 MB` };
+    if (n <= 512) return { level: 'info', msg: `${n} MB 偏小，适合 OpenWrt / 低内存 VPS；内存允许的话建议调至 1024–2048 MB` };
+    if (n <= 1024) return { level: 'info', msg: `${n} MB，如设备内存 ≥ 4 GB，建议调至 2048–4096 MB 以减少 GC 压力` };
+    if (n <= 4096) return { level: 'ok', msg: `软内存上限 ${n} MB，适合大多数家庭服务器和 VPS` };
+    if (n <= 32768) return { level: 'ok', msg: `软内存上限 ${n} MB，适合大型订阅池或高并发场景` };
+    return { level: 'info', msg: `软内存上限 ${n} MB，请确认系统物理内存充足` };
+  },
+
+  'gc-percent': v => {
+    const n = Number(v);
+    if (!n || n <= 0) return { level: 'info', msg: '0 = 使用 Go 默认值 100；内存充裕时可设为 100–200 以减少 GC 开销' };
+    if (n < 30) return { level: 'warn', msg: `${n} 过小，GC 极其频繁，CPU 开销明显增加` };
+    if (n <= 70) return { level: 'info', msg: `${n}：GC 较积极，适合低内存设备；内存充裕的话建议调至 100–150` };
+    if (n <= 100) return { level: 'ok', msg: `${n}：接近 Go 默认值，内存与 CPU 开销平衡` };
+    if (n <= 200) return { level: 'ok', msg: `${n}：GC 频率适度降低，内存充裕时的推荐值` };
+    return { level: 'warn', msg: `${n} 偏高，堆膨胀空间过大，内存峰值可能明显偏高` };
+  },
+
+  // 基础网络与路径校验
+  'system-proxy': v => {
+    const s = String(v).trim().toLowerCase();
+    if (!s || s === 'direct') return null; // 允许空或 direct
+    if (!/^(http|https|socks5|socks5h):\/\//.test(s)) return { level: 'warn', msg: '代理地址应包含协议头，如 http:// 或 socks5://' };
+    return { level: 'ok', msg: '代理格式合规，请自行确保代理可用' };
+  },
+  'speed-test-url': v => {
+    const s = String(v).trim();
+    if (!s || s.toLowerCase() === 'random') return null;
+    if (!/^https?:\/\//i.test(s)) {
+      return { level: 'warn', msg: '测速地址应以 http:// 或 https:// 开头' };
+    }
+    return null;
+  },
+
+  'sub-store-path': v => {
+    const s = String(v).trim();
+    if (!s) return null;
+    if (!s.startsWith('/')) {
+      return { level: 'warn', msg: '路径建议以 / 开头，例如：/my-sub-store' };
+    }
+    if (/\s/.test(s)) {
+      return { level: 'warn', msg: '路径中不应包含空格' };
+    }
+    return null;
+  },
+
+  'github-api-mirror': v => {
+    const s = String(v).trim();
+    if (!s) return null;
+    if (!/^https?:\/\//i.test(s)) {
+      return { level: 'warn', msg: '请填写完整的 URL，如 https://.../' };
+    }
+    if (!s.endsWith('/')) {
+      return { level: 'info', msg: '建议在末尾加上 / 以防路径拼接错误' };
+    }
+    return null;
+  },
+
+  'sub-urls-retry': v => {
+    const n = Number(v);
+    if (!v) return null;
+    if (n > 10) return { level: 'warn', msg: `重试 ${n} 次过多，如果节点失效，重试太多次会严重拖慢运行速度` };
+    if (n > 5) return { level: 'info', msg: '建议重试次数不要超过 5 次' };
+    return null;
+  },
+
+  'sub-url-max-size-mb': v => {
+    const n = Number(v);
+
+    if (!v || Number.isNaN(n)) return null;
+    if (n <= 20)
+      return { level: 'warn', msg: `每个订阅链接大小限制 ${n} MB` };
+    if (n <= 50)
+      return { level: 'warn', msg: `每个订阅链接大小限制 ${n} MB，请注意异常链接` };
+    if (n <= 100)
+      return { level: 'warn', msg: `每个订阅链接大小限制 ${n} MB，拉取速度将更慢` };
+    return { level: 'warn', msg: `每个订阅链接大小限制 ${n} MB，请注意恶意链接` };
+  },
+
+  /* success-rate 校验：入参为界面显示值（0–100%），存储值为其 ÷1000 */
+  'success-rate': v => {
+    const n = Number(v);
+
+    // 辅助函数：根据数值选择显示单位
+    const formatRate = (val) => {
+      if (val < 10) {
+        // <1% 时显示千分比
+        return `${val}‰`;
+      }
+      // ≥1% 时显示百分比
+      return `${(val / 10).toFixed(1)}%`;
+    };
+
+    if (n === 0) {
+      return { level: 'info', msg: '0 = 不打印成功率信息' };
+    }
+    if (n > 0 && n <= 10) {
+      return { level: 'ok', msg: `阈值 ${formatRate(n)} 推荐，仅打印几乎完全失效的订阅源信息` };
+    }
+    if (n > 10 && n <= 50) {
+      return { level: 'info', msg: `阈值 ${formatRate(n)}` };
+    }
+    if (n > 50 && n <= 100) {
+      return { level: 'warn', msg: `阈值 ${formatRate(n)} 考验订阅压力，将打印更多订阅成功率信息` };
+    }
+    if (n > 100 && n <= 300) {
+      return { level: 'warn', msg: `阈值 ${formatRate(n)} 达标订阅比较少，打印成功率信息将淹没日志` };
+    }
+    if (n > 300) {
+      return { level: 'warn', msg: `阈值 ${formatRate(n)} 过高，打印成功率信息将淹没日志` };
+    }
+
+    // 兜底提示
+    return { level: 'info', msg: `阈值 ${formatRate(n)} 已应用` };
+  },
+  'listen-port': v => {
+    const r = _validatePortField(v);
+    if (!r || r.level !== 'ok') return r;
+    return _checkPortConflict(v, 'sub-store-port', 'Sub-Store') || r;
+  },
+  'sub-store-port': v => {
+    if (!String(v).trim()) return { level: 'info', msg: '留空，不启动 Sub-Store 服务，禁用自动生成订阅链接' };
+    const r = _validatePortField(v);
+    if (!r || r.level !== 'ok') return r;
+    return _checkPortConflict(v, 'listen-port', '主监听') || r;
+  },
+  'sub-store-produce-cron': v => {
+    const raw = String(v).trim();
+    if (!raw) return null;
+    const rules = raw.split(';');
+    for (const rule of rules) {
+      if (!rule.trim()) continue;
+      const parts = rule.trim().split(',');
+      if (parts.length < 3) return { level: 'warn', msg: `规则 "${rule}" 格式不完整，应为 "cron表达式,类型,名称"` };
+      const expr = parts[0].trim();
+      const type = parts[1].trim();
+      const name = parts.slice(2).join(',').trim(); // 防止名字里有逗号被错误截断
+
+      if (!_isValidCron(expr)) {
+        return { level: 'warn', msg: `Cron 表达式 "${expr}" 无效` };
+      }
+      if (type !== 'sub' && type !== 'col') {
+        return { level: 'warn', msg: `类型应为 sub (单条) 或 col (组合)，当前为 "${type}"` };
+      }
+      if (!name) {
+        return { level: 'warn', msg: `订阅名称不能为空` };
+      }
+    }
+    return { level: 'ok', msg: '缓存策略语法合法' };
+  },
+  'sub-process.node-split': v => {
+    if (v) {
+      const dnsEnable = _getLiveVal('sub-process.resolve-domain.enable', 'false');
+      if (dnsEnable !== 'true') {
+        return { level: 'warn', msg: '节点裂变依赖「启用 DNS 解析」，请修改相应设置' };
+      }
+    }
+    return null;
+  },
+
+  'singbox-latest.version': v => {
+    const raw = String(v || '').trim();
+    if (!raw) {
+      return { level: 'info', msg: '未填写版本号，默认使用最新版本 1.14' };
+    }
+
+    // 更强健的版本提取：支持 v1.14.x / 1.14.33 / 1.14 / v1.14
+    const match = raw.match(/(\d+)\.(\d+)/);
+    if (!match) {
+      return { level: 'warn', msg: `版本号格式不正确：${raw}，示例：1.14 或 v1.14.33` };
+    }
+
+    const major = Number(match[1]);
+    const minor = Number(match[2]);
+
+    // < 1.14 → 需要升级
+    if (major < 1 || (major === 1 && minor < 14)) {
+      return {
+        level: 'warn',
+        msg: `版本号 ${raw}（解析为 ${major}.${minor}）低于最新版本 1.14，建议升级`
+      };
+    }
+
+    // = 1.14 → OK
+    if (major === 1 && minor === 14) {
+      return { level: 'ok', msg: `版本号 ${raw} 已是最新稳定版本 1.14` };
+    }
+
+    // > 1.14 → 用户主动选择高版本
+    return {
+      level: 'info',
+      msg: `版本号 ${raw} 高于当前推荐版本 1.14，请确认兼容性`
+    };
+  },
+
+  'singbox-extra.version': v => {
+    const raw = String(v || '').trim();
+    if (!raw) {
+      return { level: 'info', msg: '未填写版本号，默认使用 1.15-pre' };
+    }
+
+    // 提取数字版本：支持 v1.11.x / 1.11 / 1.11.5 / v1.12 等
+    const match = raw.match(/(\d+)\.(\d+)/);
+    if (!match) {
+      return { level: 'warn', msg: `版本号格式不正确：${raw}，示例：1.15 或 v1.15.5` };
+    }
+
+    const major = Number(match[1]);
+    const minor = Number(match[2]);
+
+    // ≤ 1.11
+    if (major === 1 && minor <= 11) {
+      return {
+        level: 'warn',
+        msg: `singbox-extra 版本 ${raw} 已从 App Store 下架；sing-box MT 版本 1.14 于 2026-08-31 上架 App Store，建议尽快下载`
+      };
+    }
+
+    // > 1.11 → 用户主动选择旧版本，不提示
+    return { level: 'ok', msg: `使用Extra版本 ${raw}` };
+  },
+
+};
+
+
+/* ═══════════════════════════ 字段值双向变换 ═══════════════════════════
+ * load : 从配置对象 → 界面显示值
+ * save : 从界面显示值 → 配置对象
+ * ─────────────────────────────────────────────────────────────────── */
+const VALUE_TRANSFORM = {
+  /**
+   * success-rate：后端存 0–1（如 0.5），界面显示 0–100（如 50%）
+   *   load: 0.5  → 50
+   *   save: 50   → 0.5
+   */
+  'success-rate': {
+    load: v => {
+      if (v == null || v === '') return v;
+      return +(Number(v) * 1000).toFixed(4);   // 0.03 → 3.0（避免浮点尾巴）
+    },
+    save: v => {
+      const n = parseFloat(v);
+      if (isNaN(n)) return 0;
+      return +(n / 1000).toFixed(6);            // 3 → 0.03
+    },
+  },
+  // sub-process.regex-filter-keep：后端存 bool，select 控件存 "true"/"false" 字符串
+  'sub-process.regex-filter-keep': {
+    load: v => (v === false || v === 'false') ? 'false' : 'true',  // bool → string
+    save: v => v !== 'false',   // string → bool
+  },
+
+  // 前端多行 url-list 与后端 YAML 嵌套 Map 的双向转换
+  'proxy-server-nameserver-policy': {
+    load: v => {
+      // 后端 Map -> 前端多行文本
+      if (!v || typeof v !== 'object' || Array.isArray(v)) return [];
+      return Object.entries(v).map(([k, val]) => {
+        // 如果后端存的是数组，用逗号连接方便显示
+        const vStr = Array.isArray(val) ? val.join(', ') : val;
+        return `${k}: ${vStr}`;
+      });
+    },
+    save: v => {
+      const obj = {};
+      (Array.isArray(v) ? v : []).forEach(line => {
+        // 使用正则精确匹配第一个 “冒号+至少一个空格” 作为分隔，防止误切 URL 里的冒号
+        const match = line.match(/^(.*?):\s+(.*)$/);
+        if (match) {
+          const k = match[1].trim().replace(/^['"]|['"]$/g, '');
+          const val = match[2].trim().replace(/^['"]|['"]$/g, '');
+          if (k && val) {
+            if (val.includes(',')) {
+              obj[k] = val.split(',').map(s => s.trim());
+            } else {
+              obj[k] = val;
+            }
+          }
+        }
+      });
+      return Object.keys(obj).length ? obj : undefined;
+    }
+  },
+  save: v => {
+    // 前端多行文本 -> 后端 Map
+    const obj = {};
+    (Array.isArray(v) ? v : []).forEach(line => {
+      const idx = line.indexOf(':');
+      if (idx > 0) {
+        // 清除多余的空格和可能存在的单双引号
+        const k = line.slice(0, idx).trim().replace(/^['"]|['"]$/g, '');
+        const val = line.slice(idx + 1).trim().replace(/^['"]|['"]$/g, '');
+        if (k && val) {
+          // 支持单行填写多个 DNS，转为数组格式保存以对齐 Mihomo
+          if (val.includes(',')) {
+            obj[k] = val.split(',').map(s => s.trim());
+          } else {
+            obj[k] = val;
+          }
+        }
+      }
+    });
+    // 没有任何规则时返回 undefined，防止在 yaml 中生成空字段
+    return Object.keys(obj).length ? obj : undefined;
+  }
+};
+
+
+/* ═══════════════════════════ 特殊保留值定义 ═══════════════════════════
+ * 当文本框的值与列表中某项完全匹配时，显示高亮样式 + 标签徽章。
+ * ─────────────────────────────────────────────────────────────────── */
+const SPECIAL_INPUT_VALUES = {
+  'speed-test-url': [
+    { value: 'random', label: '内置测速池', hint: '多个下载地址随机轮询，减轻单点压力' },
+    { value: '', label: '关闭测速', hint: '留空，不进行下载测速' },
+  ],
+  'system-proxy': [
+    { value: 'direct', label: '直连', hint: '强制直连，不使用任何系统代理' },
+    { value: '', label: '自动', hint: '留空，自动检测系统代理' },
+  ],
+  'sub-store-port': [
+    { value: '', label: '禁用 Sub Store 服务', hint: '未设置端口，Sub Store 服务禁用' },
+  ],
+  get 'mihomo-overwrite-url'() {
+    // 动态获取当前表单的 listen-port，并提取纯端口号
+    const listenPort = typeof _getLiveVal === 'function'
+      ? String(_getLiveVal('listen-port', ':8199'))
+      : String(_cfg?.['listen-port'] || ':8199');
+    const port = listenPort.replace(/^.*:/, '') || '8199';
+
+    return [
+      { value: `http://127.0.0.1:${port}/Mihomo-Rules-CDN.yaml`, label: 'PRO', hint: 'PRO' },
+      { value: `http://127.0.0.1:${port}/Mihomo-Rules-Lite-CDN.yaml`, label: 'PRO-Lite', hint: 'PRO 精简' },
+      { value: `http://127.0.0.1:${port}/ACL4SSR_Online_Full.yaml`, label: 'ACL4SSR', hint: '经典' },
+    ];
+  }
+};
+
+/* ═══════════════════════════ Cron 段元数据 ═══════════════════════════ */
+const _CRON_SEGMENTS = [
+  { label: '分钟', title: '分钟 (0-59)' },
+  { label: '小时', title: '小时 (0-23)' },
+  { label: '日', title: '日 (1-31)' },
+  { label: '月份', title: '月份 (1-12)' },
+  { label: '星期', title: '星期 (0-7，0=周日)' },
+];
+
+/* ── Cron 字段元数据（复用于校验提示） ── */
+const _CRON_FIELD_RANGES = [
+  { name: '分钟', min: 0, max: 59 },
+  { name: '小时', min: 0, max: 23 },
+  { name: '日', min: 1, max: 31 },
+  { name: '月份', min: 1, max: 12 },
+  { name: '星期', min: 0, max: 7 },
+];
+
+/* ════════════════════════════════════════════════════════════
+   并发估算工具（对应后端 NewLogDecay / NewExpDecay / NewPowerDecay）
+════════════════════════════════════════════════════════════ */
+
+const _logDecay = (amp, k, base) => x => { const v = Math.log(1 + k * x); return base + amp * (v > 0 ? v / (1 + v) : 0); };
+const _expDecay = (amp, b, base) => x => base + amp * (1 - Math.exp(-b * x));
+const _powerDecay = (amp, p, alpha, base) => x => { if (x <= 0) return base; const xp = x ** p; return base + amp * xp / (xp + alpha); };
+const _roundInt = v => Math.round(v);
+
+/**
+ * 统一的表单值读取器
+ * 优先读取 DOM 以实现实时联动，DOM 无值时回退到 _cfg 或 fallback
+ */
+function _getLiveVal(key, fallback = '') {
+  // 限定只能找 input、select 或 textarea，避开外层 div
+  const inp = document.querySelector(`input[data-key="${key}"], select[data-key="${key}"], textarea[data-key="${key}"]`);
+  let val;
+  if (inp) {
+    val = inp.type === 'checkbox' ? inp.checked : inp.value;
+  } else {
+    val = _cfg?.[key];
+  }
+
+  if (typeof fallback === 'number') {
+    const n = parseFloat(val);
+    return (isNaN(n) || n < 0) ? fallback : n;
+  }
+  return (val !== undefined && val !== null) ? String(val).trim() : fallback;
+}
+
+/**
+ * _estimateAuto — 根据 concurrent 基准估算三个阶段的自动并发数。
+ * 对应后端 NewProxyChecker 中的自动分支，proxyCount 未知时以 concurrent 代替。
+ *
+ * @returns {{ alive: number, speed: number, media: number, base: number }}
+ */
+function _estimateAuto() {
+  // 优先从 _cfg 读（renderConfigForm 后始终最新），DOM 作为兜底（用户正在编辑时）
+  const base = Math.max(1, _getLiveVal('concurrent', 20));
+  const totalLimit = _getLiveVal('total-speed-limit', 0);
+  const minSpeedKB = Math.max(1, _getLiveVal('min-speed', 128));
+
+  const alive = _roundInt(_logDecay(400, 0.005, 400)(base));
+
+  let speed;
+  if (totalLimit > 0) {
+    const r = minSpeedKB / 1024;
+    speed = Math.max(1, Math.min(Math.round(totalLimit / r), base));
+  } else {
+    speed = Math.min(base, _roundInt(_powerDecay(32, 1.1, 32, 1)(base)));
+  }
+
+  const media = _roundInt(_expDecay(400, 0.001, 100)(base));
+  return { alive, speed, media, base };
+}
+
+function _parsePort(v) {
+  const s = String(v).trim();
+  if (!s) return null;
+
+  const match = s.match(/^(?:([^:]*):)?(\d+)$/);
+  if (!match) return { err: '格式不合法，应为 port、:port 或 ip:port' };
+
+  let [, ip, portStr] = match;
+  if (ip === '') ip = undefined;
+
+  if (ip !== undefined && ip.toLowerCase() !== 'localhost') {
+    const segs = ip.split('.');
+    const valid = segs.length === 4 && segs.every(seg => {
+      const n = Number(seg);
+      return /^\d+$/.test(seg) && n >= 0 && n <= 255;
+    });
+    if (!valid) return { err: `IP 地址 "${ip}" 格式不合法` };
+  }
+
+  return { port: Number(portStr), ip: ip ?? null };
+}
+
+function _validatePortField(v) {
+  if (!String(v).trim()) return null;
+  const result = _parsePort(v);
+  if (!result) return null;
+  if (result.err) return { level: 'warn', msg: result.err };
+
+  const { port, ip } = result;
+  if (port < 1 || port > 65535)
+    return { level: 'warn', msg: `端口 ${port} 超出范围（1–65535）` };
+
+  const ipPart = ip ? `${ip}:` : '';
+  return { level: 'ok', msg: `监听 ${ipPart}${port}` };
+}
+
+function _formatBytes(bytes) {
+  if (!bytes || bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+/** 端口冲突校验 */
+function _checkPortConflict(currentVal, otherKey, otherName) {
+  const thisPort = String(currentVal).replace(/^.*:/, '');
+  const otherVal = _getLiveVal(otherKey, '');
+  const otherPort = String(otherVal).replace(/^.*:/, ''); // 加上 String() 更安全
+
+  if (thisPort && otherPort && thisPort === otherPort) {
+    return { level: 'warn', msg: `与 ${otherName}端口 ${otherPort} 冲突！` };
+  }
+  return null;
+}
+
+/** 判断三个并发字段中是否有任意一个为 0（触发联动自动模式）*/
+function _anyAutoMode() {
+  return _getLiveVal('alive-concurrent', 0) === 0
+    || _getLiveVal('speed-concurrent', 0) === 0
+    || _getLiveVal('media-concurrent', 0) === 0;
+}
+
+
+/* ═══════════════════════════ Cron 值解析 ═══════════════════════════ */
+function _parseCronValue(v) {
+  const raw = (v ?? '').trim();
+  const commented = raw.startsWith('#');
+  const expr = commented ? raw.replace(/^#\s*/, '').trim() : raw;
+  const parts = expr ? expr.split(/\s+/) : [];
+  // 统一使用增强版 _isValidCron，避免两处重复逻辑
+  const valid = _isValidCron(expr);
+  return { raw, commented, expr, parts, valid };
+}
+
+/* ════════════════════════════════════════════════════════════
+   嵌套对象 ↔ 点分隔键 互转
+   ─────────────────────────────────────────────────────────
+   · SCHEMA 中 key = 'singbox-latest.version' 即为嵌套路径
+   · renderConfigForm 时将配置对象展平为点分隔键，存入 _cfg
+   · collectConfigForm 时将 _cfg 还原为嵌套对象后返回
+   · 不影响任何现有平铺键（如 'save-method'）
+════════════════════════════════════════════════════════════ */
+function _flattenCfg(obj, prefix = '', out = {}) {
+  for (const [k, v] of Object.entries(obj ?? {})) {
+    const key = prefix ? `${prefix}.${k}` : k;
+    if (
+      v !== null &&
+      typeof v === 'object' &&
+      !Array.isArray(v) &&
+      key !== 'proxy-server-nameserver-policy' // ← 跳过展平这个原生字典
+    ) {
+      _flattenCfg(v, key, out);
+    } else {
+      out[key] = v;
+    }
+  }
+  return out;
+}
+
+function _unflattenCfg(flat) {
+  const out = {};
+  for (const [key, val] of Object.entries(flat)) {
+    const parts = key.split('.');
+    let cur = out;
+    for (let i = 0; i < parts.length - 1; i++) {
+      // 若已存在但不是普通对象（如被赋为数组/基本类型），覆盖为对象
+      if (typeof cur[parts[i]] !== 'object' || cur[parts[i]] === null || Array.isArray(cur[parts[i]])) {
+        cur[parts[i]] = {};
+      }
+      cur = cur[parts[i]];
+    }
+    cur[parts[parts.length - 1]] = val;
+  }
+  return out;
+}
+
+/* ═══════════════════════════ DOM 工具 ═══════════════════════════ */
+function el(tag, attrs = {}) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'class') e.className = v;
+    else if (k === 'textContent') e.textContent = v;
+    else if (k === 'innerHTML') e.innerHTML = v;
+    else if (k.startsWith('data-')) e.dataset[k.slice(5)] = v;
+    else e.setAttribute(k, v);
+  }
+  return e;
+}
+
+
+/* ═══════════════════════════ 内联校验 ═══════════════════════════ */
+function _updateInlineHint(row, result) {
+  let h = row.querySelector('.cfg-inline-hint');
+  if (!result) { h?.remove(); return; }
+  if (!h) { h = el('div', { class: 'cfg-inline-hint' }); row.appendChild(h); }
+  h.className = `cfg-inline-hint lvl-${result.level}`;
+  h.innerHTML = `${_ICON[result.level] || _ICON.info}<span>${result.msg}</span>`;
+}
+
+function _attachValidator(row, fieldDef) {
+  // 1. 通用查找：明确限定标签名，防止找到 div
+  const inp = row.querySelector(`input[data-key="${fieldDef.key}"], select[data-key="${fieldDef.key}"], textarea[data-key="${fieldDef.key}"]`);
+  if (!inp) return;
+
+  // 2. 绑定通用校验逻辑
+  const fn = FIELD_VALIDATORS[fieldDef.key];
+  if (fn) {
+    const run = () => _updateInlineHint(row, fn(inp.type === 'checkbox' ? inp.checked : inp.value));
+    inp.addEventListener('input', run);
+    inp.addEventListener('change', run);
+    requestAnimationFrame(run); // 初始化时执行一次，显示默认状态
+  }
+
+  // 3. 专属联动逻辑区
+  // ── A. 端口冲突双向联动 ──
+  const PORT_KEYS = ['listen-port', 'sub-store-port'];
+  if (PORT_KEYS.includes(fieldDef.key)) {
+    inp.addEventListener('input', () => {
+      PORT_KEYS.filter(k => k !== fieldDef.key).forEach(k => {
+        // 准确把 change 事件派发给对方的 input 框
+        document.querySelector(`input[data-key="${k}"]`)?.dispatchEvent(new Event('change'));
+      });
+    });
+  }
+
+  // ── B. 并发控制联动与防抖保存 ──
+  if (fieldDef.type === 'number') {
+    const CONCURRENT_KEYS = ['alive-concurrent', 'speed-concurrent', 'media-concurrent'];
+    if (CONCURRENT_KEYS.includes(fieldDef.key)) {
+      inp.addEventListener('input', () => {
+        CONCURRENT_KEYS.filter(k => k !== fieldDef.key).forEach(k => {
+          document.querySelector(`input[data-key="${k}"]`)?.dispatchEvent(new Event('change'));
+        });
+      });
+    }
+
+    if (fieldDef.key === 'concurrent') {
+      inp.addEventListener('input', () => {
+        document.querySelector(`input[data-key="subs-parse-batch"]`)?.dispatchEvent(new Event('change'));
+      });
+    }
+
+    // ── 基准字段：防抖 1s 后串行保存 + 重载 ──
+    const TRIGGER_KEYS = ['concurrent', 'total-speed-limit', 'min-speed', ...CONCURRENT_KEYS];
+    if (TRIGGER_KEYS.includes(fieldDef.key)) {
+      let _basisTimer = null;
+      inp.addEventListener('input', () => {
+        clearTimeout(_basisTimer);
+        _basisTimer = setTimeout(async () => {
+          await window.saveConfigWithValidation?.();
+          await window.loadConfigValidated?.();
+        }, 1500);
+      });
+    }
+  }
+}
+
+function getRecipientIcon(text) {
+  // 去掉可能存在的前缀 "数字:alerts="
+  const cleaned = text.replace(/^\d+:alerts=/i, "");
+  const lower = (cleaned ?? '').toLowerCase().trim();
+
+  if (lower.startsWith('tgram')) return Icons.telegram;
+  if (lower.startsWith('twitter') || lower.startsWith('x://')) return Icons.x;
+  if (lower.startsWith('whatsapp')) return Icons.whatsapp;
+  if (lower.startsWith('line')) return Icons.line;
+  if (lower.startsWith('slack')) return Icons.slack;
+  if (lower.startsWith('discord')) return Icons.discord;
+  if (lower.startsWith('bark')) return Icons.bark;
+  if (lower.startsWith('dingtalk')) return Icons.dingtalk;
+  if (lower.startsWith('wecombot') || lower.startsWith('wechat')) return Icons.wecombot;
+  if (lower.startsWith('qq')) return Icons.qq;
+  if (lower.startsWith('feishu')) return Icons.feishu;
+  if (lower.startsWith('ntfy')) return Icons.ntfy;
+  if (lower.startsWith('mailto') || lower.startsWith('mail')) return Icons.mail;
+  return Icons.link;
+}
+
+// mkLinks — 生成一组外部链接按钮
+function mkLinks(links) {
+  const wrap = el('div', { class: 'cfg-links' });
+  for (const lk of links) {
+    if (lk.miniInfo) {
+      // 携带 miniInfo 的链接：变为卡片触发器
+      // 注意这里使用 data-infoMini，生成 DOM 时会自动变成 data-info-mini
+      const a = el('a', {
+        class: `cfg-link cfg-link-mini`,
+        href: 'javascript:void(0);',
+        'data-infoMini': lk.miniInfo,
+      });
+      a.innerHTML = (LINK_ICONS[lk.icon] ?? LINK_ICONS.link) + lk.label;
+
+      // 触摸端点击触发
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleMiniTooltipFor(a);
+      });
+      wrap.appendChild(a);
+    } else {
+      // 普通外链
+      const a = el('a', {
+        class: `cfg-link${lk.icon === 'github' ? ' cfg-link-github' : ''}`,
+        href: lk.href, target: '_blank', rel: 'noopener noreferrer', title: lk.href,
+      });
+      a.innerHTML = (LINK_ICONS[lk.icon] ?? LINK_ICONS.link) + lk.label;
+      wrap.appendChild(a);
+    }
+  }
+  return wrap;
+}
+
+
+/* ═══════════════════════════ 控件渲染器 ═══════════════════════════ */
+
+function mkPassword(field, value) {
+  const wrap = el('div', { class: 'cfg-pw-wrap' });
+  const inp = el('input', {
+    class: 'cfg-input cfg-pw-input', type: 'password',
+    'data-key': field.key, placeholder: field.placeholder ?? '••••••••',
+    autocomplete: 'new-password',
+  });
+  inp.value = value ?? '';
+  const btn = el('button', { type: 'button', class: 'cfg-pw-toggle', title: '显示/隐藏密码' });
+  btn.innerHTML = _SVG_EYE;
+  btn.addEventListener('click', () => {
+    const hidden = inp.type === 'password';
+    inp.type = hidden ? 'text' : 'password';
+    btn.innerHTML = hidden ? _SVG_EYE_OFF : _SVG_EYE;
+    btn.classList.toggle('active', hidden);
+  });
+  wrap.append(inp, btn);
+  return wrap;
+}
+
+/**
+ * mkInput — 文本输入框
+ * 若字段在 SPECIAL_INPUT_VALUES 中定义，则在值匹配保留值时：
+ *   · 输入框添加 .cfg-input--special 高亮样式
+ *   · 右侧显示小徽章（如"随机测速"/"直连"）
+ */
+function mkInput(field, value) {
+  if (field.type === 'password') return mkPassword(field, value);
+
+  const isExpandable = field.type === 'text' && field.fullWidth;
+  const tag = isExpandable ? 'textarea' : 'input';
+  const attrs = {
+    class: 'cfg-input', 'data-key': field.key, placeholder: field.placeholder ?? '',
+  };
+  if (isExpandable) {
+    attrs.rows = '1'; attrs.spellcheck = 'false';
+    attrs.autocomplete = 'off'; attrs.autocorrect = 'off'; attrs.autocapitalize = 'none';
+    attrs.class += ' cfg-expandable-input';
+  } else {
+    attrs.type = 'text';
+  }
+  const inp = el(tag, attrs);
+  inp.value = value ?? '';
+
+  if (isExpandable) {
+    let _singleLineH = 0;
+    const autoResize = () => {
+      if (!inp.matches(':focus')) return;
+      inp.style.height = '1px';
+      let sh = inp.scrollHeight;
+      if (!_singleLineH) {
+        const pv = inp.value; inp.value = 'x';
+        _singleLineH = inp.scrollHeight;
+        inp.value = pv; sh = inp.scrollHeight;
+      }
+      inp.style.height = sh > _singleLineH ? Math.min(sh, 300) + 'px' : '';
+    };
+    inp.addEventListener('input', autoResize);
+    inp.addEventListener('focus', autoResize);
+    inp.addEventListener('blur', () => { inp.style.height = ''; });
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') e.preventDefault(); });
+  }
+
+  const specialDefs = SPECIAL_INPUT_VALUES[field.key];
+  if (!specialDefs) return inp;
+
+  /* ── 重新设计：胶囊 + 右侧行内提示 ── */
+  const wrap = el('div', { class: 'cfg-special-wrap' });
+
+  // 输入框 + 右侧提示层
+  const inputWrap = el('div', { class: 'cfg-special-input-wrap' });
+  const hintOverlay = el('span', { class: 'cfg-special-hint' });
+  inputWrap.append(inp, hintOverlay);
+
+  // 胶囊行
+  const chipsRow = el('div', { class: 'cfg-special-chips' });
+  specialDefs.forEach(spec => {
+    const chip = el('button', {
+      type: 'button',
+      class: 'cfg-special-chip',
+      title: spec.hint,
+      textContent: spec.label,
+    });
+    chip.addEventListener('click', () => {
+      // 已激活 → 再次点击清空（回到 placeholder 状态）
+      inp.value = inp.value === spec.value ? '' : spec.value;
+      inp.dispatchEvent(new Event('input'));
+      inp.focus();
+    });
+    chipsRow.appendChild(chip);
+  });
+
+  wrap.append(inputWrap, chipsRow);
+
+  const syncState = () => {
+    const v = inp.value;
+    const spec = specialDefs.find(s => s.value === v);
+
+    // 右侧提示
+    if (spec?.hint) {
+      hintOverlay.textContent = spec.hint;
+      hintOverlay.classList.add('visible');
+    } else {
+      hintOverlay.classList.remove('visible');
+    }
+
+    // 输入框淡染
+    inp.classList.toggle('cfg-input--special', !!spec);
+
+    // 胶囊激活态
+    chipsRow.querySelectorAll('.cfg-special-chip').forEach((chip, i) => {
+      chip.classList.toggle('active', specialDefs[i].value === v);
+    });
+  };
+
+  inp.addEventListener('input', syncState);
+  requestAnimationFrame(syncState);
+
+  return wrap;
+}
+
+function mkNumber(field, value) {
+  const wrap = el('div', { class: 'cfg-number-wrap' });
+  const inp = el('input', {
+    type: 'number', 'data-key': field.key,
+    // min: String(field.min ?? ''),
+    // max: String(field.max ?? ''),
+    step: String(field.step ?? 1), placeholder: field.placeholder ?? '',
+  });
+  inp.value = (value !== undefined && value !== null && value !== '') ? value : '';
+  const makeBtn = (sym, dir) => {
+    const b = el('button', { class: 'cfg-step-btn', type: 'button', textContent: sym });
+    b.addEventListener('click', () => {
+      const cur = parseFloat(inp.value) || 0, step = field.step ?? 1;
+      const next = dir > 0 ? cur + step : cur - step;
+      inp.value = Math.max(field.min ?? -Infinity, Math.min(field.max ?? Infinity, +next.toFixed(10)));
+      inp.dispatchEvent(new Event('input'));
+    });
+    return b;
+  };
+  wrap.append(makeBtn('−', -1), inp, makeBtn('+', 1));
+  return wrap;
+}
+
+function mkToggle(key, value) {
+  const wrap = el('div', { class: 'cfg-toggle-wrap' });
+  const label = el('label', { class: 'cfg-toggle' });
+  const cb = el('input', { type: 'checkbox', 'data-key': key });
+  const slider = el('span', { class: 'cfg-toggle-slider' });
+  cb.checked = Boolean(value);
+  label.append(cb, slider);
+  wrap.appendChild(label);
+  return wrap;
+}
+
+function mkSelect(field, value) {
+  const currentVal = (value !== undefined && value !== null) ? String(value) : String(field.options[0]?.value ?? '');
+  const currentLabel = field.options.find(o => String(o.value) === currentVal)?.label ?? currentVal;
+
+  const native = el('select', { class: 'cfg-select-native', 'data-key': field.key, 'aria-hidden': 'true' });
+  native.style.cssText = 'position:absolute;opacity:0;pointer-events:none;width:0;height:0;';
+  for (const opt of field.options) {
+    const o = el('option', { value: String(opt.value), textContent: opt.label });
+    if (String(opt.value) === currentVal) o.selected = true;
+    native.appendChild(o);
+  }
+
+  const trigger = el('button', { type: 'button', class: 'cfg-sel-trigger', 'aria-haspopup': 'listbox', 'aria-expanded': 'false' });
+  trigger.innerHTML = `<span class="cfg-sel-value">${currentLabel}</span>
+    <svg class="cfg-sel-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>`;
+
+  const dropdown = el('div', { class: 'cfg-sel-dropdown', role: 'listbox' });
+  dropdown.style.display = 'none';
+
+  for (const opt of field.options) {
+    const optVal = String(opt.value);
+    const item = el('div', {
+      class: `cfg-sel-option${optVal === currentVal ? ' selected' : ''}`,
+      role: 'option', 'aria-selected': String(optVal === currentVal),
+      'data-value': optVal, textContent: opt.label,
+    });
+    item.addEventListener('mousedown', e => e.preventDefault());
+    item.addEventListener('click', () => {
+      trigger.querySelector('.cfg-sel-value').textContent = opt.label;
+      native.value = optVal;
+      native.dispatchEvent(new Event('change', { bubbles: true }));
+      dropdown.querySelectorAll('.cfg-sel-option').forEach(i => {
+        i.classList.toggle('selected', i.dataset.value === optVal);
+        i.setAttribute('aria-selected', String(i.dataset.value === optVal));
+      });
+      closeDropdown();
+    });
+    dropdown.appendChild(item);
+  }
+
+  const wrap = el('div', { class: 'cfg-sel-wrap' });
+  /* 字段级 selectWidth 覆盖 CSS 默认 max-width */
+  if (field.selectWidth) wrap.style.maxWidth = field.selectWidth;
+  wrap.append(native, trigger, dropdown);
+
+  const openDropdown = () => { dropdown.style.display = ''; trigger.setAttribute('aria-expanded', 'true'); trigger.classList.add('open'); dropdown.querySelector('.cfg-sel-option.selected')?.scrollIntoView({ block: 'nearest' }); };
+  const closeDropdown = () => { dropdown.style.display = 'none'; trigger.setAttribute('aria-expanded', 'false'); trigger.classList.remove('open'); };
+
+  trigger.addEventListener('click', () => dropdown.style.display === 'none' ? openDropdown() : closeDropdown());
+  trigger.addEventListener('blur', () => setTimeout(closeDropdown, 120));
+  trigger.addEventListener('keydown', e => {
+    const items = [...dropdown.querySelectorAll('.cfg-sel-option')];
+    const cur = items.findIndex(i => i.classList.contains('selected'));
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); dropdown.style.display === 'none' ? openDropdown() : closeDropdown(); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); if (dropdown.style.display === 'none') openDropdown(); items[Math.min(cur + 1, items.length - 1)]?.click(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); items[Math.max(cur - 1, 0)]?.click(); }
+    else if (e.key === 'Escape') { closeDropdown(); }
+  });
+  return wrap;
+}
+
+function mkChips(field, values) {
+  const active = new Set(Array.isArray(values) ? values : []);
+  const wrap = el('div', { class: 'cfg-chips', 'data-key': field.key });
+  for (const opt of field.options) {
+    const chip = el('label', { class: `cfg-chip${active.has(opt) ? ' active' : ''}` });
+
+    // 给不同字段分别加上专属的 hover 数据源标识
+    const isMiniInfoChip = field.key === 'node-type' || field.key === 'platforms';
+    if (field.key === 'node-type') {
+      chip.dataset.protoMini = opt;
+    } else if (field.key === 'platforms') {
+      chip.dataset.platformMini = opt;
+    }
+
+    const cb = el('input', { type: 'checkbox', value: opt });
+    cb.checked = active.has(opt);
+    cb.addEventListener('change', () => chip.classList.toggle('active', cb.checked));
+    chip.append(cb, document.createTextNode(opt));
+
+    // 触摸端专用的说明入口：桌面端靠整个胶囊 hover，触摸端没有 hover，
+    // 用这个小图标承担"查看说明"，避免和"点击选中/取消选中"冲突
+    if (isMiniInfoChip) {
+      const infoBtn = el('span', { class: 'cfg-chip-info', 'aria-hidden': 'true', innerHTML: _ICON.info });
+      infoBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleMiniTooltipFor(chip);
+      });
+      chip.appendChild(infoBtn);
+    }
+
+    wrap.appendChild(chip);
+  }
+
+  // 重置按钮，挂到 wrap 上供 mkField 取用
+  const resetBtn = el('button', {
+    type: 'button',
+    class: 'cfg-chips-reset',
+    title: '清空所有选择',
+    textContent: '↺',
+  });
+  resetBtn.addEventListener('click', () => {
+    wrap.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+      cb.checked = false;
+      cb.closest('.cfg-chip')?.classList.remove('active');
+    });
+  });
+  wrap._resetBtn = resetBtn;
+
+  return wrap;
+}
+
+
+/* ═══════════════════════════ 订阅检测数据展示 ═══════════════════════════ */
+
+let _cachedReportData = null;
+let _reportCacheTime = 0;
+let _reportPromise = null; // 用于锁定正在进行的请求
+
+export function invalidateReportCache() {
+  _cachedReportData = null;
+  _reportCacheTime = 0;
+  _reportPromise = null;
+
+  // 强行让当前界面上所有的订阅地址栏触发专属刷新事件
+  document.querySelectorAll('.cfg-url-input').forEach(inp => {
+    inp.dispatchEvent(new Event('scp-refresh-stats'));
+  });
+  document.querySelectorAll('.cfg-url-list').forEach(list => {
+    list.dispatchEvent(new Event('scp-refresh-stats'));
+  });
+}
+
+async function _getReportData() {
+  if (_cachedReportData && Date.now() - _reportCacheTime < 60000) {
+    return _cachedReportData;
+  }
+  // 如果当前已经有请求在飞，直接返回同一个 Promise，防止并发风暴
+  if (_reportPromise) return _reportPromise;
+
+  _reportPromise = (async () => {
+    try {
+      const res = await w.sfetch('/api/analysis-report');
+      if (res?.ok && (res.payload?.report || res.payload.report_data)) {
+
+        // 给主线程让渡约 50ms，让面板切换动画先跑完，避免被解析工作锁死
+        await new Promise(resolve => setTimeout(resolve, 50));
+
+        _cachedReportData = res.payload.report_data || YAML.parse(res.payload.report);
+        _reportCacheTime = Date.now();
+        return _cachedReportData;
+      }
+    } catch (e) {
+      console.error('Fetch report failed', e);
+    } finally {
+      _reportPromise = null;
+    }
+    return null;
+  })();
+
+  return _reportPromise;
+}
+
+const _SVG_PIE_CHART = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"></path><path d="M22 12A10 10 0 0 0 12 2v10z"></path></svg>`;
+
+const _tooltipUrlTruncator = (() => {
+  let canvas = null;
+  let ctx = null;
+  let observer = null;
+
+  function getCtx() {
+    if (!canvas) {
+      canvas = document.createElement("canvas");
+      ctx = canvas.getContext("2d");
+    }
+    return ctx;
+  }
+
+  const truncate = (el) => {
+    const text = el.dataset.fullText;
+    if (!text) return;
+    const availW = el.clientWidth - 1;
+    if (availW <= 0) return;
+    const c = getCtx();
+    if (!c) { el.textContent = text; return; }
+    const style = window.getComputedStyle(el);
+    c.font = style.font || `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    if (c.measureText(text).width <= availW) {
+      if (el.textContent !== text) el.textContent = text;
+      return;
+    }
+    let lo = 0, hi = text.length;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      const candidate = text.slice(0, Math.ceil(mid / 2)) + "…" + text.slice(-Math.floor(mid / 2));
+      if (c.measureText(candidate).width <= availW) {
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+    }
+    const finalStr = text.slice(0, Math.ceil(lo / 2)) + "…" + text.slice(-Math.floor(lo / 2));
+    if (el.textContent !== finalStr) el.textContent = finalStr;
+  };
+
+  return {
+    observe: (el) => {
+      if (!observer) {
+        observer = new ResizeObserver((entries) => {
+          for (const entry of entries) requestAnimationFrame(() => truncate(entry.target));
+        });
+      }
+      observer.observe(el);
+      truncate(el);
+    },
+    disconnect: () => {
+      if (observer) observer.disconnect();
+    }
+  };
+})();
+
+let _subTooltipEl = null;
+let _subTooltipOverlayEl = null;
+
+window._copySubUrl = async function (btn, url) {
+  let ok = false;
+  if (navigator.clipboard && window.isSecureContext) {
+    try { await navigator.clipboard.writeText(url); ok = true; } catch (e) { /* fall through */ }
+  }
+  if (!ok) {
+    const ta = document.createElement('textarea');
+    ta.value = url;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;padding:0;border:none;outline:none;opacity:0;';
+    document.body.appendChild(ta);
+    const isIOS = /ipad|iphone/i.test(navigator.userAgent);
+    if (isIOS) {
+      const range = document.createRange(); range.selectNodeContents(ta);
+      const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+      ta.setSelectionRange(0, 999999);
+    } else {
+      ta.select();
+    }
+    try { ok = document.execCommand('copy'); } catch (e) { /* ignore */ }
+    document.body.removeChild(ta);
+  }
+
+  if (ok) {
+    const oldHtml = btn.innerHTML;
+    btn.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="var(--success)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+    window.showToast?.('已复制链接', 'success', 1500);
+    setTimeout(() => {
+      // 悬浮窗可能已被关掉，节点可能已不在 DOM
+      if (btn.isConnected) btn.innerHTML = oldHtml;
+    }, 1500);
+  } else {
+    window.showToast?.('复制失败，请手动选取', 'warn');
+  }
+};
+
+// 关闭悬浮窗（模块级，避免每次打开都重新创建闭包）
+function _closeSubTooltip() {
+  if (_subTooltipEl) _subTooltipEl.classList.remove('visible');
+  if (_subTooltipOverlayEl) {
+    _subTooltipOverlayEl.classList.remove('visible');
+    setTimeout(() => {
+      // 200ms 内若又打开了新的悬浮窗，则不要把遮罩收掉
+      if (_subTooltipEl && !_subTooltipEl.classList.contains('visible')) {
+        _subTooltipOverlayEl.style.display = 'none';
+      }
+    }, 200);
+  }
+  window.removeEventListener('scroll', _tooltipScrollHandler, true);
+
+  // 尝试把焦点还给刚刚带 .is-active 的按钮
+  const activeBtn = document.querySelector('.cfg-url-btn-tier.is-active');
+  if (activeBtn) activeBtn.focus();
+}
+
+// 配置面板滚动时关闭悬浮窗（悬浮窗内部滚动不触发）
+function _tooltipScrollHandler(e) {
+  if (!_subTooltipEl || _subTooltipEl.contains(e.target)) return;
+  const tableWrapper = document.getElementById('cfgPanels');
+  if (tableWrapper && (e.target === tableWrapper || tableWrapper.contains(e.target))) {
+    _closeSubTooltip();
+  }
+}
+
+// 悬浮窗通用外壳：负责创建 DOM、写入内容、定位与显示。
+// 本地订阅（_showSubTooltip）和远程订阅清单共用同一套外壳与样式。
+function _openSubTooltip(btn, html) {
+  if (!_subTooltipEl) {
+    _subTooltipOverlayEl = el('div', { id: 'subStatsOverlay' });
+    document.body.appendChild(_subTooltipOverlayEl);
+    _subTooltipOverlayEl.addEventListener('click', _closeSubTooltip);
+
+    _subTooltipEl = el('div', { id: 'subStatsTooltip' });
+    document.body.appendChild(_subTooltipEl);
+
+    document.addEventListener('click', (e) => {
+      if (!_subTooltipEl?.classList.contains('visible')) return;
+      if (e.target.closest('.sub-tooltip-close-btn')) {
+        _closeSubTooltip();
+        return;
+      }
+      // 点在悬浮窗内或触发按钮上 → 不关
+      if (e.target.closest('#subStatsTooltip') || e.target.closest('.cfg-url-btn-tier')) return;
+      _closeSubTooltip();
+    });
+  }
+
+  // 同一函数引用重复 addEventListener 是幂等的，不会叠加监听
+  window.addEventListener('scroll', _tooltipScrollHandler, true);
+
+  _subTooltipEl.innerHTML = html;
+
+  requestAnimationFrame(() => {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    if (vw <= 768) {
+      _subTooltipOverlayEl.style.display = 'block';
+      requestAnimationFrame(() => { _subTooltipOverlayEl.classList.add('visible'); });
+
+      _subTooltipEl.classList.add('is-mobile-modal');
+    } else {
+      _subTooltipEl.classList.remove('is-mobile-modal');
+
+      const rect = btn.getBoundingClientRect();
+      const elRect = _subTooltipEl.getBoundingClientRect();
+      const margin = 10;
+      const viewW = window.innerWidth;
+      const viewH = window.innerHeight;
+
+      let left;
+      if (viewW <= 768) {
+        left = (viewW - elRect.width) / 2;
+      } else if (rect.left - elRect.width - margin >= margin) {
+        left = rect.left - elRect.width - margin;
+      } else if (rect.right + elRect.width + margin <= viewW - margin) {
+        left = rect.right + margin;
+      } else {
+        left = (viewW - elRect.width) / 2;
+      }
+
+      left = Math.max(margin, Math.min(left, viewW - elRect.width - margin));
+
+      let top = rect.top + rect.height / 2 - elRect.height / 2;
+      top = Math.max(margin, Math.min(top, viewH - elRect.height - margin));
+
+      _subTooltipEl.style.left = left + 'px';
+      _subTooltipEl.style.top = top + 'px';
+    }
+
+    _subTooltipEl.classList.add('visible');
+  });
+}
+
+/* ───────────── 订阅链接匹配 / 远程订阅聚合 ─────────────
+ * 实现位于 analysis.js（报告页与此处共用），这里只做委托，保证两处逻辑一致。 */
+const matchSubUrl = (cfgUrlRaw, reportUrls) => window.matchSubUrl(cfgUrlRaw, reportUrls);
+const buildRemoteAggregate = (entry, report) => window.buildRemoteAggregate(entry, report);
+const _buildRemoteLinksHtml = (remote) => window.buildRemoteLinksHtml ? window.buildRemoteLinksHtml(remote) : '';
+
+function _showSubTooltip(btn, subData, checkTime) {
+
+  const fmtRateFn = window.fmtRate || (r => Number(r).toFixed(1) + '%');
+  const escapeHtml = window.esc || (str => String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
+  const formatNum = (n) => {
+    n = Number(n) || 0;
+    if (n >= 10000) return (n / 10000).toFixed(1).replace(/\.0$/, '') + 'W';
+    if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+    return n;
+  };
+
+  const report = window.getSubReportState ? window.getSubReportState(subData) : getSubReportState(subData);
+  const { state, success, total, errMsg, rateNum, scoreNum, tier } = report;
+
+  const isGrade = state === 'grade';
+  const isFatalErr = state === 'dead';
+  const isTempErr = state === 'temp';
+  const isSilent = state === 'silent';
+  const isEmpty = state === 'empty';
+
+  const tierClass = isGrade ? `tier-${tier.key}` : `tier-${state}`;
+  const tierLabel = isGrade ? tier.label : isSilent ? '沉默' : isTempErr ? '异常' : isFatalErr ? '失效' : '0';
+
+  let ringContent;
+  if (isGrade) ringContent = escapeHtml(fmtRateFn(rateNum));
+  else if (isSilent) ringContent = escapeHtml(fmtRateFn(0));
+  else if (isEmpty) ringContent = '<span class="sub-ring-empty-text">无节点</span>';
+  else if (isTempErr) ringContent = '<span class="sub-ring-state-text">异常</span>';
+  else ringContent = '<span class="sub-ring-state-text">失效</span>';
+
+  const hasRingProgress = isGrade && rateNum > 0;
+  const radius = 26;
+  const circumference = 2 * Math.PI * radius;
+  const offset = hasRingProgress ? circumference - (Math.min(rateNum, 100) / 100) * circumference : circumference;
+
+  const protos = subData.protocols
+    ? Object.entries(subData.protocols).sort((a, b) => b[1] - a[1])
+    : [];
+
+  const locIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>`;
+
+  // analysis.js 统一提供地区标签与附加统计
+  const remote = subData._remote || null;
+
+  const locPills = window.buildLocPillsHtml
+    ? window.buildLocPillsHtml(subData, 8, locIcon)
+    : '';
+
+  const extraStats = window.buildSubExtraStatsHtml
+    ? window.buildSubExtraStatsHtml(subData, {
+      sizeTitle: remote ? '各订阅文件大小合计' : '订阅文件大小'
+    })
+    : '';
+
+  let rawUrl = subData.url || '';
+  let nameTag = subData._displayTag || '';
+  let cleanUrl = rawUrl;
+  const hashIdx = rawUrl.lastIndexOf('#');
+  if (hashIdx !== -1) {
+    cleanUrl = rawUrl.substring(0, hashIdx);
+    if (!nameTag) {
+      try { nameTag = decodeURIComponent(rawUrl.substring(hashIdx + 1)); }
+      catch (e) { nameTag = rawUrl.substring(hashIdx + 1); }
+    }
+  }
+
+  let statusMessage = '';
+  if (isTempErr) statusMessage = `<div class="sub-status-message is-temp"><span class="status-label">异常</span><span class="status-content" title="${escapeHtml(errMsg || '临时网络或服务异常')}">${escapeHtml(errMsg || '临时网络或服务异常')}</span></div>`;
+  else if (isFatalErr) statusMessage = `<div class="sub-status-message is-dead"><span class="status-label">失效</span><span class="status-content" title="${escapeHtml(errMsg || '订阅链接已失效')}">${escapeHtml(errMsg || '订阅链接已失效')}</span></div>`;
+  else if (isEmpty) statusMessage = `<div class="sub-status-message is-empty"><span class="status-label">无节点</span><span class="status-content" title="${escapeHtml(errMsg || '未获取到节点')}">${escapeHtml(errMsg || '未获取到任何节点')}</span></div>`;
+
+  const html = `
+<div class="sub-item ${tierClass}">
+    <button class="sub-tooltip-close-btn">×</button>
+
+    ${nameTag ? `
+    <div class="sub-corner-tag">
+        <svg class="tag-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+            <line x1="7" y1="7" x2="7.01" y2="7"></line>
+        </svg>
+        <span class="tag-text">${escapeHtml(nameTag)}</span>
+    </div>` : '<div style="height: 12px;"></div>'}
+
+    <div class="sub-tooltip-copy-box">
+        <div class="sub-tooltip-copy-text">
+            ${escapeHtml(rawUrl)}
+        </div>
+        <button type="button" class="sub-tooltip-copy-action" title="复制完整链接">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+            </svg>
+        </button>
+    </div>
+
+    <div class="sub-stats-hero">
+        <div class="sub-ring-box">
+            <div class="sub-ring-wrapper" title="${escapeHtml(errMsg || '')}">
+                <svg class="sub-ring-svg" viewBox="0 0 64 64">
+                    <circle class="sub-ring-bg" cx="32" cy="32" r="${radius}"></circle>
+                    <circle class="sub-ring-progress" cx="32" cy="32" r="${radius}" stroke-dasharray="${circumference}"
+                        stroke-dashoffset="${offset}"></circle>
+                </svg>
+                <div class="sub-ring-text ${(isFatalErr || isTempErr || isEmpty) ? 'text-lg' : ''}">${ringContent}</div>
+            </div>
+        </div>
+        <div class="sub-hero-divider"></div>
+        <div class="sub-hero-middle">
+            ${remote
+      ? `<div class="sub-info-row" title="精确值: ${remote.count}">
+            <span class="info-label">订阅链接</span>
+            <span class="info-value">${formatNum(remote.count)}</span>
+         </div>`
+      : `<div class="sub-info-row">
+            <span class="info-label">综合评分</span>
+            <span class="info-value score-val">${isGrade ? scoreNum.toFixed(2) : '-'}</span>
+         </div>`}
+
+            <div class="sub-info-row" title="精确值: ${success}">
+                <span class="info-label">有效节点</span>
+                <span class="info-value success-val">${formatNum(success)}</span>
+            </div>
+
+            <div class="sub-info-row" title="精确值: ${total}">
+                <span class="info-label">节点总数</span>
+                <span class="info-value total-val">${formatNum(total)}</span>
+            </div>
+        </div>
+        <div class="sub-hero-divider"></div>
+        <div class="sub-hero-right">
+            <div class="sub-tier-badge">
+                <span class="tier-text">${escapeHtml(tierLabel)}</span>
+                <span class="tier-title">${isGrade ? '评级' : '状态'}</span>
+            </div>
+        </div>
+    </div>
+
+    ${statusMessage}
+
+    ${extraStats}
+
+    ${(locPills || protos.length > 0) ? `
+    <div class="sub-meta-tags">
+        ${locPills}
+        ${protos.map(([k, v]) => `<span class="tag-pill proto"><span class="p-name">${escapeHtml(k)}</span><span
+                class="p-val">${v}</span></span>`).join('')}
+    </div>` : ''}
+
+    ${_buildRemoteLinksHtml(remote)}
+
+    ${checkTime ? `<div class="sub-time-footer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+        </svg><span class="time-label">上次检测:</span><span class="time-val">${escapeHtml(checkTime)}</span></div>` : ''}
+</div>
+  `;
+
+  _openSubTooltip(btn, html);
+
+  // 绑定复制：避免 inline onclick（单引号 URL 会炸）+ 阻止冒泡以免关窗
+  const copyBtn = _subTooltipEl?.querySelector('.sub-tooltip-copy-action');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      window._copySubUrl(copyBtn, rawUrl);
+    });
+  }
+}
+
+function mkUrlList(field, values) {
+  const list = Array.isArray(values) ? values : (values ? [values] : []);
+  const wrap = el('div', { class: 'cfg-url-list', 'data-key': field.key });
+
+  // 折行按钮
+  const wrapToggle = el('button', {
+    type: 'button',
+    class: 'cfg-url-wrap-toggle',
+    title: '切换折行',
+    textContent: '↵ 折行',
+  });
+  wrap._wrapToggle = wrapToggle;
+
+  let wrapOn = false;
+  wrapToggle.addEventListener('click', () => {
+    wrapOn = !wrapOn;
+    wrap.classList.toggle('wrap-mode', wrapOn);
+    wrapToggle.classList.toggle('active', wrapOn);
+    wrapToggle.textContent = wrapOn ? '→ 单行' : '↵ 折行';
+
+    // 将 DOM 操作的 读/写 分离，避免循环中的强制同步重排 (Layout Thrashing)
+    const inputs = Array.from(wrap.querySelectorAll('.cfg-url-input'));
+    if (wrapOn) {
+      // 批量纯写操作
+      inputs.forEach(t => { t.style.height = 'auto'; });
+      // 批量纯读操作 (只在这里触发一次重排)
+      const heights = inputs.map(t => Math.min(t.scrollHeight, 300));
+      // 批量纯写操作
+      inputs.forEach((t, i) => { t.style.height = heights[i] + 'px'; });
+    } else {
+      inputs.forEach(t => { t.style.height = ''; });
+    }
+  });
+
+  const addBtnTop = el('button', { class: 'cfg-url-add cfg-url-add-top', type: 'button', textContent: '↓ 插入' });
+  const addBtn = el('button', { class: 'cfg-url-add cfg-url-add-bottom', type: 'button', textContent: '+ 添加' });
+
+  // ── 拖拽状态 ──────────────────────────────────────────────────────
+  let _dragSrc = null;
+
+  // ── 鼠标拖拽事件 ──────────────────────────────────────────────────
+  function _onDragStart(e, row) {
+    _dragSrc = row;
+    row.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', '');
+  }
+
+  function _onDragEnd(row) {
+    row.classList.remove('dragging');
+    wrap.querySelectorAll('.cfg-url-item').forEach(r =>
+      r.classList.remove('drag-over-top', 'drag-over-bottom')
+    );
+    _dragSrc = null;
+  }
+
+  function _onDragOver(e, row) {
+    if (!_dragSrc || row === _dragSrc) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const rect = row.getBoundingClientRect();
+    wrap.querySelectorAll('.cfg-url-item').forEach(r =>
+      r.classList.remove('drag-over-top', 'drag-over-bottom')
+    );
+    row.classList.add(e.clientY < rect.top + rect.height / 2 ? 'drag-over-top' : 'drag-over-bottom');
+  }
+
+  function _onDragLeave(row) {
+    row.classList.remove('drag-over-top', 'drag-over-bottom');
+  }
+
+  function _onDrop(e, row) {
+    e.preventDefault();
+    if (!_dragSrc || row === _dragSrc) return;
+    const rect = row.getBoundingClientRect();
+    const before = e.clientY < rect.top + rect.height / 2;
+    wrap.insertBefore(_dragSrc, before ? row : row.nextSibling);
+    row.classList.remove('drag-over-top', 'drag-over-bottom');
+  }
+
+  // ── 触摸拖拽 ──────────────────────────────────────────────────────
+  let _touchSrc = null;
+  let _touchClone = null;
+  let _touchOffsetX = 0;
+  let _touchOffsetY = 0;
+
+  function _getRowFromPoint(x, y) {
+    // _touchClone 已经设置了穿透，直接拿元素即可，消灭频繁的 display 显隐重排
+    const el = document.elementFromPoint(x, y);
+    return el?.closest('.cfg-url-item') ?? null;
+  }
+
+
+  function _onTouchStart(e, row) {
+    if (!e || !e.target) return;
+    if (!e.target.closest('.cfg-url-drag')) return;
+    e.preventDefault();
+
+    _touchSrc = row;
+    const touch = e.touches[0];
+    const rect = row.getBoundingClientRect();
+    _touchOffsetX = touch.clientX - rect.left;
+    _touchOffsetY = touch.clientY - rect.top;
+
+    _touchClone = row.cloneNode(true);
+    Object.assign(_touchClone.style, {
+      position: 'fixed',
+      zIndex: '9999',
+      width: rect.width + 'px',
+      left: (touch.clientX - _touchOffsetX) + 'px',
+      top: (touch.clientY - _touchOffsetY) + 'px',
+      opacity: '0.85',
+      boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
+      borderRadius: '6px',
+    });
+    // 强制声明 pointer-events 为 none，这是让 elementFromPoint 流畅工作的关键
+    _touchClone.style.setProperty('pointer-events', 'none', 'important');
+    document.body.appendChild(_touchClone);
+    row.classList.add('dragging');
+  }
+
+  function _onTouchMove(e) {
+    if (!_touchSrc) return;
+    e.preventDefault();
+
+    const touch = e.touches[0];
+
+    // 跟手移动
+    if (_touchClone) {
+      _touchClone.style.left = (touch.clientX - _touchOffsetX) + 'px';
+      _touchClone.style.top = (touch.clientY - _touchOffsetY) + 'px';
+    }
+
+    // 高亮目标行
+    const target = _getRowFromPoint(touch.clientX, touch.clientY);
+    wrap.querySelectorAll('.cfg-url-item').forEach(r =>
+      r.classList.remove('drag-over-top', 'drag-over-bottom')
+    );
+    if (target && target !== _touchSrc) {
+      const rect = target.getBoundingClientRect();
+      target.classList.add(
+        touch.clientY < rect.top + rect.height / 2 ? 'drag-over-top' : 'drag-over-bottom'
+      );
+    }
+  }
+
+  function _onTouchEnd(e) {
+    if (!_touchSrc) return;
+
+    const touch = e.changedTouches[0];
+    const target = _getRowFromPoint(touch.clientX, touch.clientY);
+
+    if (target && target !== _touchSrc) {
+      const rect = target.getBoundingClientRect();
+      const before = touch.clientY < rect.top + rect.height / 2;
+      wrap.insertBefore(_touchSrc, before ? target : target.nextSibling);
+    }
+
+    // 清理
+    _touchSrc.classList.remove('dragging');
+    wrap.querySelectorAll('.cfg-url-item').forEach(r =>
+      r.classList.remove('drag-over-top', 'drag-over-bottom')
+    );
+    _touchClone?.remove();
+    _touchClone = null;
+    _touchSrc = null;
+  }
+
+  // 触摸事件挂在 wrap 上，避免每行重复绑定
+  wrap.addEventListener('touchstart', _onTouchStart.bind(null, null), { passive: false });
+
+  // ── 行构建 ────────────────────────────────────────────────────────
+  function addRow(val = '', atTop = false) {
+    const row = el('div', { class: 'cfg-url-item', draggable: 'true' });
+
+    // 拖拽把手
+    const handle = el('span', {
+      class: 'cfg-url-drag',
+      title: '拖动排序',
+      innerHTML: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
+        <circle cx="9"  cy="5"  r="1" fill="currentColor" stroke="none"/>
+        <circle cx="15" cy="5"  r="1" fill="currentColor" stroke="none"/>
+        <circle cx="9"  cy="12" r="1" fill="currentColor" stroke="none"/>
+        <circle cx="15" cy="12" r="1" fill="currentColor" stroke="none"/>
+        <circle cx="9"  cy="19" r="1" fill="currentColor" stroke="none"/>
+        <circle cx="15" cy="19" r="1" fill="currentColor" stroke="none"/>
+      </svg>`,
+    });
+
+    const inp = el('textarea', {
+      class: 'cfg-input cfg-url-input',
+      rows: '1',
+      placeholder: field.placeholder ?? 'https://', // 优先使用 SCHEMA 定义的 placeholder，没有则回退 https://
+      spellcheck: 'false',
+      autocomplete: 'off',
+      autocorrect: 'off',
+      autocapitalize: 'none',
+    });
+    inp.value = val;
+
+
+    // 通知渠道图标
+    let iconEl = null;
+    if (field.key === 'recipient-url') {
+      iconEl = el('span', { class: 'cfg-url-icon', title: '' });
+      iconEl.innerHTML = getRecipientIcon(val);
+      inp.addEventListener('input', () => {
+        iconEl.innerHTML = getRecipientIcon(inp.value);
+      });
+    }
+
+    let _singleLineH = 0;
+    const autoResize = () => {
+      if (!inp.matches(':focus') && !wrap.classList.contains('wrap-mode')) return;
+      inp.style.height = 'auto';
+      let sh = inp.scrollHeight;
+      if (!_singleLineH) {
+        const pv = inp.value;
+        inp.value = 'x';
+        _singleLineH = inp.scrollHeight;
+        inp.value = pv;
+        sh = inp.scrollHeight;
+      }
+      if (wrap.classList.contains('wrap-mode') || sh > _singleLineH) {
+        inp.style.height = Math.min(sh, 300) + 'px';
+      } else {
+        inp.style.height = '';
+      }
+    };
+
+    inp.addEventListener('input', autoResize);
+    inp.addEventListener('focus', autoResize);
+    inp.addEventListener('blur', () => { inp.style.height = ''; });
+
+    const del = el('button', { class: 'cfg-url-del', type: 'button', title: '删除', textContent: '×' });
+    del.addEventListener('click', () => row.remove());
+
+    // 拖拽事件：仅通过把手触发，避免输入框内拖选文字时误触
+    handle.addEventListener('mousedown', () => { row.draggable = true; });
+    inp.addEventListener('mousedown', () => { row.draggable = false; });
+    inp.addEventListener('mouseup', () => { row.draggable = true; });
+
+    row.addEventListener('dragstart', e => _onDragStart(e, row));
+    row.addEventListener('dragend', () => _onDragEnd(row));
+    row.addEventListener('dragover', e => _onDragOver(e, row));
+    row.addEventListener('dragleave', () => _onDragLeave(row));
+    row.addEventListener('drop', e => _onDrop(e, row));
+
+    // 触摸拖拽
+    row.addEventListener('touchstart', e => _onTouchStart(e, row), { passive: false });
+
+    // touchmove / touchend 挂在 document 上，确保手指移出 row 时仍能跟踪
+    document.addEventListener('touchmove', _onTouchMove, { passive: false });
+    document.addEventListener('touchend', _onTouchEnd);
+
+    if (field.key === 'recipient-url') {
+      const inputWrap = el('div', { class: 'cfg-url-input-wrap' });
+
+      const iconEl = el('span', { class: 'cfg-url-icon' });
+      iconEl.innerHTML = getRecipientIcon(val);
+
+      inp.addEventListener('input', () => {
+        iconEl.innerHTML = getRecipientIcon(inp.value);
+      });
+
+      inputWrap.append(iconEl, inp);
+      row.append(handle, inputWrap, del);
+    } else if (field.key === 'sub-urls' || field.key === 'sub-urls-remote') {
+      // 远程订阅清单：报告里存的是「清单 → 订阅链接」关系，需聚合其下各订阅的统计
+      const isRemote = field.key === 'sub-urls-remote';
+
+      // 按输入框地址从报告中取数据。
+      // 本地订阅直接取对应条目；远程订阅返回聚合后的 subData（带 _remote 明细）。
+      const lookupSubData = (report, currentUrl) => {
+        if (isRemote) {
+          const remotes = report.remote_subs || [];
+          const matchedUrl = matchSubUrl(currentUrl, remotes.map(r => r.url));
+          const entry = matchedUrl ? remotes.find(r => r.url === matchedUrl) : null;
+          return { matchedUrl, subData: entry ? buildRemoteAggregate(entry, report) : null };
+        }
+        const allSubs = [
+          ...(report.subs_ranking || []),
+          ...(report.subs_ranking_bad || [])
+        ];
+        const matchedUrl = matchSubUrl(currentUrl, allSubs.map(s => s.url));
+        return { matchedUrl, subData: matchedUrl ? allSubs.find(s => s.url === matchedUrl) : null };
+      };
+
+      // 合并后的多功能徽章按钮
+      const statsBtn = el('button', {
+        class: 'cfg-url-btn-tier tier-unknown',
+        type: 'button'
+      });
+
+      statsBtn.innerHTML = typeof getSubStateIcon === 'function'
+        ? getSubStateIcon('unknown', 12)
+        : '?';
+
+      statsBtn.title = '未知状态 (获取中...)';
+
+      // 根据报告数据统一更新按钮状态
+      const updateStatsButton = (subData) => {
+        if (!subData) {
+          statsBtn.className = 'cfg-url-btn-tier tier-unknown';
+          statsBtn.innerHTML = typeof getSubStateIcon === 'function'
+            ? getSubStateIcon('unknown', 12)
+            : '?';
+          statsBtn.title = '暂无数据 (可能含有未匹配变量或未被检测)';
+          return;
+        }
+
+        const reportState = window.getSubReportState
+          ? window.getSubReportState(subData)
+          : getSubReportState(subData);
+
+        const {
+          state,
+          success,
+          total,
+          errMsg,
+          scoreNum,
+          tier
+        } = reportState;
+
+        if (state === 'grade') {
+
+          statsBtn.className = `cfg-url-btn-tier tier-${tier.key}`;
+          statsBtn.innerHTML = tier.label;
+          statsBtn.title =
+            `评级: ${tier.label} | 综合分: ${scoreNum.toFixed(1)} | 有效: ${success}/${total}` +
+            (subData._remote ? ` | 订阅链接: ${subData._remote.count}` : '');
+
+        } else if (state === 'silent') {
+
+          // 沉默：睡眠 SVG
+          statsBtn.className = 'cfg-url-btn-tier tier-silent';
+          statsBtn.innerHTML = typeof getSubStateIcon === 'function'
+            ? getSubStateIcon('silent', 12)
+            : '∅';
+          statsBtn.title =
+            `沉默 | 有效节点: 0 | 节点总数: ${total}`;
+
+        } else if (state === 'empty') {
+
+          // 无节点：中性 SVG
+          statsBtn.className = 'cfg-url-btn-tier tier-empty';
+          statsBtn.innerHTML = typeof getSubStateIcon === 'function'
+            ? getSubStateIcon('empty', 12)
+            : '0';
+          statsBtn.title = errMsg
+            ? `无节点 | 有效节点: 0 | 节点总数: 0 | ${errMsg}`
+            : '无节点 | 有效节点: 0 | 节点总数: 0';
+
+        } else if (state === 'temp') {
+
+          // 临时异常：警告 SVG
+          statsBtn.className = 'cfg-url-btn-tier tier-temp';
+          statsBtn.innerHTML = typeof getSubStateIcon === 'function'
+            ? getSubStateIcon('temp', 12)
+            : '!';
+          statsBtn.title = errMsg
+            ? `异常 | ${errMsg}`
+            : '异常 | 临时网络或服务异常';
+
+        } else if (state === 'dead') {
+
+          // 失效：X SVG
+          statsBtn.className = 'cfg-url-btn-tier tier-dead';
+          statsBtn.innerHTML = typeof getSubStateIcon === 'function'
+            ? getSubStateIcon('dead', 12)
+            : '×';
+          statsBtn.title = errMsg
+            ? `失效 | ${errMsg}`
+            : '失效 | 订阅链接已失效';
+
+        } else {
+
+          statsBtn.className = 'cfg-url-btn-tier tier-unknown';
+          statsBtn.innerHTML = typeof getSubStateIcon === 'function'
+            ? getSubStateIcon('unknown', 12)
+            : '?';
+          statsBtn.title = '暂无数据';
+        }
+      };
+
+      // 将检查更新逻辑封装为闭包函数
+      const refreshStats = () => {
+        _getReportData().then(report => {
+          if (!report) return;
+
+          const currentUrl = inp.value.trim();
+          if (!currentUrl) {
+            updateStatsButton(null);
+            return;
+          }
+
+          const { matchedUrl, subData } = lookupSubData(report, currentUrl);
+
+          if (!matchedUrl || !subData) {
+            updateStatsButton(null);
+            return;
+          }
+
+          // 防止异步获取报告期间用户已经修改了输入框
+          if (currentUrl !== inp.value.trim()) return;
+
+          updateStatsButton(subData);
+        });
+      };
+
+      // 只要用户改动了链接内容，恢复为未知状态
+      inp.addEventListener('input', () => {
+        statsBtn.className = 'cfg-url-btn-tier tier-unknown';
+        statsBtn.innerHTML = typeof getSubStateIcon === 'function'
+          ? getSubStateIcon('unknown', 12)
+          : '?';
+        statsBtn.title = '内容已修改，请重新检测';
+      });
+
+      // 监听专属刷新事件，实现无感重绘
+      inp.addEventListener('scp-refresh-stats', refreshStats);
+
+      // 初始化时执行一次
+      refreshStats();
+
+      // 点击弹出详情 Tooltip
+      statsBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        /* 1. 一进来先清除其他所有按钮的高亮 */
+        document.querySelectorAll('.cfg-url-btn-tier.is-active').forEach(b => {
+          b.classList.remove('is-active');
+        });
+
+        const currentUrl = inp.value.trim();
+
+        if (!currentUrl) {
+          return window.showToast?.('订阅地址为空', 'warn', 2000);
+        }
+
+        const originalHTML = statsBtn.innerHTML;
+        const originalClass = statsBtn.className;
+        const originalTitle = statsBtn.title;
+
+        statsBtn.disabled = true;
+
+        statsBtn.innerHTML = typeof _SVG_SPIN !== 'undefined'
+          ? _SVG_SPIN
+          : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                 <path d="M12 2v4"/>
+                 <path d="M12 18v4"/>
+                 <path d="m4.93 4.93 2.83 2.83"/>
+                 <path d="m16.24 16.24 2.83 2.83"/>
+                 <path d="M2 12h4"/>
+                 <path d="M18 12h4"/>
+                 <path d="m4.93 19.07 2.83-2.83"/>
+                 <path d="m16.24 7.76 2.83-2.83"/>
+               </svg>`;
+
+        const report = await _getReportData();
+
+        statsBtn.disabled = false;
+
+        // 如果请求期间用户已经修改 URL，不恢复旧状态
+        if (inp.value.trim() !== currentUrl) {
+          statsBtn.className = 'cfg-url-btn-tier tier-unknown';
+          statsBtn.innerHTML = typeof getSubStateIcon === 'function'
+            ? getSubStateIcon('unknown', 12)
+            : '?';
+          statsBtn.title = '内容已修改，请重新检测';
+          return;
+        }
+
+        if (!report) {
+          statsBtn.className = originalClass;
+          statsBtn.innerHTML = originalHTML;
+          statsBtn.title = originalTitle;
+
+          return window.showToast?.(
+            '获取报告数据失败，或您尚未运行检测',
+            'error',
+            3000
+          );
+        }
+
+        const { matchedUrl, subData } = lookupSubData(report, currentUrl);
+
+        if (!matchedUrl) {
+          statsBtn.className = 'cfg-url-btn-tier tier-unknown';
+          statsBtn.innerHTML = typeof getSubStateIcon === 'function'
+            ? getSubStateIcon('unknown', 12)
+            : '?';
+          statsBtn.title = '暂无数据';
+
+          return window.showToast?.(
+            isRemote
+              ? '无该远程订阅数据，请先运行一次检测。'
+              : '无该订阅数据。或该订阅由于网络异常被拦截。',
+            'info',
+            4000
+          );
+        }
+
+        if (!subData) {
+          statsBtn.className = 'cfg-url-btn-tier tier-unknown';
+          statsBtn.innerHTML = typeof getSubStateIcon === 'function'
+            ? getSubStateIcon('unknown', 12)
+            : '?';
+          statsBtn.title = '暂无数据';
+
+          return;
+        }
+
+        // 智能补全 Tag：配置和报告任意一方带 #Tag 均可合并继承显示
+        let cfgTag = '';
+        let repTag = '';
+
+        if (currentUrl.includes('#')) {
+          cfgTag = currentUrl.substring(currentUrl.lastIndexOf('#') + 1);
+        }
+
+        if (matchedUrl.includes('#')) {
+          repTag = matchedUrl.substring(matchedUrl.lastIndexOf('#') + 1);
+        }
+
+        subData._displayTag = cfgTag || repTag;
+
+        const checkTime = report.check_info?.check_time || '';
+
+        // 点击时也重新同步一次按钮状态
+        updateStatsButton(subData);
+
+        /* 2. 必须在 updateStatsButton 执行完毕之后，重新追加 is-active */
+        statsBtn.classList.add('is-active');
+
+        _showSubTooltip(statsBtn, subData, checkTime);
+      });
+
+      const actionsWrap = el('div', { class: 'cfg-url-actions' });
+
+      actionsWrap.style.cssText =
+        'display: flex; gap: 4px; align-items: center; margin-left: 4px;';
+
+      actionsWrap.append(statsBtn, del);
+      row.append(handle, inp, actionsWrap);
+
+    } else {
+      row.append(handle, inp, del);
+    }
+
+    if (atTop) {
+      // 插到第一个 cfg-url-item 之前，没有则插到 addBtnTop 之后
+      const firstRow = wrap.querySelector('.cfg-url-item');
+      wrap.insertBefore(row, firstRow ?? addBtn);
+    } else {
+      wrap.insertBefore(row, addBtn);
+    }
+  }
+
+  wrap.appendChild(addBtnTop);  // 顶部按钮最先
+  wrap.appendChild(addBtn);     // 底部按钮其次（行会 insertBefore 它）
+
+  addBtnTop.addEventListener('click', () => addRow('', true));
+  addBtn.addEventListener('click', () => addRow());
+  list.forEach(v => addRow(v));  // 初始行填充，仍然追加到底部按钮前
+  return wrap;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Cron 高亮输入控件  mkCronInput
+   ───────────────────────────────────────────────────────────────
+   结构：
+     .cfg-cron-wrap
+       .cfg-cron-display     ← 着色展示层（非编辑态可见）
+       .cfg-cron-labels-row  ← 段标签行（分钟/小时/日期/月份/星期）
+       input.cfg-cron-input  ← 真实 input（编辑态可见，display:none 时 DOM 仍可查）
+
+   · 点击 display / Tab → 进入编辑模式（input 出现）
+   · input 失焦 → 退出编辑，重绘 display
+   · 外部通过 'cfg-cron-refresh' 事件触发重绘（不切换模式）
+═══════════════════════════════════════════════════════════════ */
+function mkCronInput(field, value) {
+  const wrap = el('div', { class: 'cfg-cron-wrap' });
+
+  /* 真实 input */
+  const inp = el('input', {
+    class: 'cfg-input cfg-cron-input',
+    type: 'text',
+    'data-key': field.key,
+    placeholder: field.placeholder ?? '0 4 */2 * *',
+    spellcheck: 'false',
+    autocomplete: 'off',
+    autocorrect: 'off',
+    autocapitalize: 'none',
+  });
+  inp.value = value ?? '';
+
+  /* 着色展示层 */
+  const display = el('div', {
+    class: 'cfg-cron-display',
+    tabindex: '0',
+    role: 'textbox',
+    'aria-label': `${field.label}，点击编辑`,
+  });
+
+  /* 段标签行 */
+  const labelsRow = el('div', { class: 'cfg-cron-labels-row' });
+  _CRON_SEGMENTS.forEach(({ label }, i) =>
+    labelsRow.appendChild(el('span', { class: `cfg-cron-label cfg-cron-label-${i}`, textContent: label }))
+  );
+
+  /* ── 重绘着色层 ── */
+  function renderDisplay() {
+    const { raw, commented, parts, valid } = _parseCronValue(inp.value);
+    display.className = 'cfg-cron-display';
+    display.innerHTML = '';
+    // 默认先重置 display，再设 visibility 占位
+    labelsRow.style.display = '';
+    labelsRow.style.visibility = 'hidden';
+
+    if (!raw) {
+      // 暂停/空值时完全隐藏标签行，不占空间，display 层自然上移
+      labelsRow.style.display = 'none';
+      display.appendChild(el('span', { class: 'cfg-cron-placeholder', textContent: field.placeholder ?? '0 4 */2 * *' }));
+      return;
+    }
+    if (commented) {
+      display.appendChild(el('span', { class: 'cfg-cron-comment-mark', textContent: '#\u2009' }));
+    }
+    if (valid) {
+      parts.forEach((part, i) => {
+        display.appendChild(el('span', {
+          class: `cfg-cron-seg cfg-cron-seg-${i}${commented ? ' cfg-cron-seg--muted' : ''}`,
+          textContent: part,
+          title: _CRON_SEGMENTS[i].title,
+        }));
+      });
+      labelsRow.style.visibility = '';  // 有效时显示标签行
+    } else {
+      // 非空但格式非法：加错误高亮
+      display.classList.add('cfg-cron-display--raw', 'cfg-cron-display--error');
+      display.appendChild(el('span', { class: 'cfg-cron-raw-text', textContent: inp.value }));
+      labelsRow.style.display = 'none';
+    }
+  }
+
+  /* ── 模式切换 ── */
+  function enterEditMode() {
+    display.style.display = 'none';
+    labelsRow.style.display = 'none';
+    inp.style.display = '';
+    requestAnimationFrame(() => { inp.focus(); inp.select(); });
+  }
+
+  function exitEditMode() {
+    /* ── 退出时做完整校验（含字段数量）── */
+    const err = _validateCronFull(inp.value);
+    if (err) {
+      window.showToast?.(err, 'warn', 3500);
+      // 错误样式留到 display 层接管
+    }
+    inp.classList.remove('cfg-cron-input--error');
+    clearTimeout(_cronToastTimer);
+    inp.style.display = 'none';
+    display.style.display = '';
+    labelsRow.style.display = '';
+    renderDisplay();
+  }
+
+  /* ── 实时校验（编辑态） ──────────────────────────────────────────
+ * · 空值不报错（允许用户清空）
+ * · 非空且非法 → 输入框红边，防抖 600ms 后 showToast 给出具体原因
+ * · 合法或清空 → 移除错误样式，取消 toast
+ * ─────────────────────────────────────────────────────────────── */
+  let _cronToastTimer = null;
+
+  /* ── 实时校验：只校验已输入的字段，不检查字段数量，防抖 700ms 后 toast 报错 ── */
+  inp.addEventListener('input', () => {
+    const err = _validateCronPartial(inp.value);
+    inp.classList.toggle('cfg-cron-input--error', err !== null);
+
+    clearTimeout(_cronToastTimer);
+    if (!err) return;
+
+    // 防抖：用户停止输入后再弹出，避免逐字打扰
+    _cronToastTimer = setTimeout(() => {
+      window.showToast?.(`Cron 错误：${err}`, 'warn', 3000);
+    }, 700);
+  });
+
+  inp.addEventListener('blur', exitEditMode);
+  display.addEventListener('click', enterEditMode);
+  display.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === 'F2' || (e.key === ' ' && !e.ctrlKey)) { e.preventDefault(); enterEditMode(); }
+  });
+
+  /* 外部重绘钩子（_bindCronInterval 注释切换后调用） */
+  inp.addEventListener('cfg-cron-refresh', renderDisplay);
+
+  /* 初始：显示态 */
+  inp.style.display = 'none';
+  wrap.append(display, labelsRow, inp);
+  requestAnimationFrame(renderDisplay);
+  return wrap;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Produce Cron 高亮输入控件
+   针对格式：cron,type,name;cron,type,name
+═══════════════════════════════════════════════════════════════ */
+function mkProduceCronInput(field, value) {
+  const wrap = el('div', { class: 'cfg-cron-wrap' });
+
+  /* 真实 input */
+  const inp = el('input', {
+    class: 'cfg-input cfg-cron-input',
+    type: 'text',
+    'data-key': field.key,
+    placeholder: field.placeholder ?? '0 */2 * * *,sub,sub_A',
+    spellcheck: 'false',
+    autocomplete: 'off',
+    autocorrect: 'off',
+    autocapitalize: 'none',
+  });
+  inp.value = value ?? '';
+
+  /* 着色展示层 */
+  const display = el('div', {
+    class: 'cfg-cron-display',
+    tabindex: '0',
+    role: 'textbox',
+    'aria-label': `${field.label}，点击编辑`,
+  });
+  display.style.flexWrap = 'wrap';
+  display.style.height = 'auto';
+  display.style.minHeight = '34px';
+
+  function renderDisplay() {
+    display.className = 'cfg-cron-display';
+    display.innerHTML = '';
+
+    const raw = inp.value.trim();
+    if (!raw) {
+      display.appendChild(el('span', { class: 'cfg-cron-placeholder', textContent: field.placeholder }));
+      return;
+    }
+
+    const rules = raw.split(';');
+    let hasError = false;
+
+    rules.forEach((rule, rIdx) => {
+      const trimmedRule = rule.trim();
+      if (!trimmedRule) return;
+
+      const ruleWrap = el('div', { style: 'display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;background:color-mix(in srgb, var(--fg) 3%, transparent);padding:3px 6px;border-radius:6px;border:1px solid color-mix(in srgb, var(--border) 60%, transparent);margin-right:2px;margin-bottom:2px;' });
+
+      const parts = trimmedRule.split(',');
+      if (parts.length >= 3) {
+        const expr = parts[0].trim();
+        const type = parts[1].trim();
+        const name = parts.slice(2).join(',').trim();
+
+        // 1. Cron 部分 (继承原生 Cron 色彩)
+        const cronInfo = _parseCronValue(expr);
+        if (cronInfo.valid) {
+          cronInfo.parts.forEach((part, i) => {
+            ruleWrap.appendChild(el('span', {
+              class: `cfg-cron-seg cfg-cron-seg-${i}`,
+              textContent: part,
+              title: _CRON_SEGMENTS[i]?.title,
+            }));
+          });
+        } else {
+          hasError = true;
+          ruleWrap.appendChild(el('span', { class: 'cfg-cron-raw-text', style: 'color:var(--danger);', textContent: expr }));
+        }
+
+        // 2. 逗号分隔符
+        ruleWrap.appendChild(el('span', { style: 'color:var(--muted);opacity:0.5;', textContent: ',' }));
+
+        // 3. 订阅类型 (sub / col 自动上色)
+        const typeIsValid = type === 'sub' || type === 'col';
+        if (!typeIsValid) hasError = true;
+        const typeBg = type === 'sub' ? 'color-mix(in srgb, var(--accent) 15%, transparent)' : (type === 'col' ? 'color-mix(in srgb, var(--cron-1) 15%, transparent)' : 'color-mix(in srgb, var(--danger) 15%, transparent)');
+        const typeColor = type === 'sub' ? 'var(--accent)' : (type === 'col' ? 'var(--cron-1)' : 'var(--danger)');
+        ruleWrap.appendChild(el('span', {
+          style: `background:${typeBg};color:${typeColor};padding:1px 6px;border-radius:4px;font-size:11px;font-weight:700;text-transform:uppercase;`,
+          textContent: type
+        }));
+
+        // 4. 逗号分隔符
+        ruleWrap.appendChild(el('span', { style: 'color:var(--muted);opacity:0.5;', textContent: ',' }));
+
+        // 5. 订阅名称
+        if (!name) hasError = true;
+        ruleWrap.appendChild(el('span', {
+          style: `color:var(--fg);font-size:12px;font-weight:600;padding:1px 2px;`,
+          textContent: name || '?'
+        }));
+
+      } else {
+        hasError = true;
+        ruleWrap.appendChild(el('span', { class: 'cfg-cron-raw-text', style: 'color:var(--danger);', textContent: trimmedRule }));
+      }
+
+      display.appendChild(ruleWrap);
+
+      // 分号间隔符
+      if (rIdx < rules.length - 1) {
+        display.appendChild(el('span', { style: 'color:var(--muted);font-weight:bold;opacity:0.6;margin-right:4px;', textContent: ';' }));
+      }
+    });
+
+    if (hasError) {
+      display.classList.add('cfg-cron-display--error');
+    }
+  }
+
+  function enterEditMode() {
+    display.style.display = 'none';
+    inp.style.display = '';
+    requestAnimationFrame(() => { inp.focus(); inp.select(); });
+  }
+
+  function exitEditMode() {
+    inp.classList.remove('cfg-cron-input--error');
+    inp.style.display = 'none';
+    display.style.display = 'flex';
+    renderDisplay();
+  }
+
+  let _toastTimer = null;
+  inp.addEventListener('input', () => {
+    const raw = inp.value.trim();
+    let err = null;
+    if (raw) {
+      const rules = raw.split(';');
+      for (const rule of rules) {
+        if (!rule.trim()) continue;
+        const parts = rule.trim().split(',');
+        if (parts.length < 3) { err = `规则 "${rule}" 应包含 cron表达式, 类型, 名称`; break; }
+        const expr = parts[0].trim();
+        const type = parts[1].trim();
+        const name = parts.slice(2).join(',').trim();
+        const cronErr = _validateCronPartial(expr);
+        if (cronErr) { err = cronErr; break; }
+        if (type && type !== 'sub' && type !== 'col') { err = '类型应为 sub 或 col'; break; }
+      }
+    }
+    inp.classList.toggle('cfg-cron-input--error', err !== null);
+    clearTimeout(_toastTimer);
+    if (!err) return;
+    _toastTimer = setTimeout(() => {
+      window.showToast?.(`格式错误：${err}`, 'warn', 3000);
+    }, 700);
+  });
+
+  inp.addEventListener('blur', exitEditMode);
+  display.addEventListener('click', enterEditMode);
+  display.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === 'F2' || (e.key === ' ' && !e.ctrlKey)) { e.preventDefault(); enterEditMode(); }
+  });
+
+  inp.addEventListener('cfg-cron-refresh', renderDisplay);
+
+  inp.style.display = 'none';
+  wrap.append(display, inp);
+  requestAnimationFrame(renderDisplay);
+  return wrap;
+}
+
+function renderHintBlock(fieldDef) {
+  const wrap = el('span', { class: 'cfg-label-hint' });
+  if (fieldDef.hint) {
+    wrap.appendChild(document.createTextNode(fieldDef.hint));
+  }
+  if (fieldDef.hintExamples?.length) {
+    // 与 hint 文字之间留一点间距
+    if (fieldDef.hint) {
+      wrap.appendChild(document.createTextNode('\u2002')); // en space
+    }
+    fieldDef.hintExamples.forEach(ex => {
+      const c = document.createElement('code');
+      c.className = 'cfg-hint-code';
+      c.textContent = ex;
+      wrap.appendChild(c);
+    });
+  }
+  return wrap;
+}
+
+// _mkProxyTestBtn 代理检测按钮
+function _mkProxyTestBtn(getProxyVal) {
+  const wrap = el('div', { class: 'cfg-proxy-test-wrap' });
+
+  const btn = el('button', {
+    type: 'button',
+    class: 'cfg-proxy-test-btn',
+    title: '检测代理是否可用',
+  });
+  btn.innerHTML = `${_SVG_PROXY_TEST}<span>检测</span>`;
+
+  const badge = el('span', { class: 'cfg-proxy-test-badge' });
+  badge.style.display = 'none';
+
+  wrap.append(btn, badge);
+
+  // 可见性同步：direct 时隐藏整个按钮
+  // 等 DOM 构建完成后再绑定（labelRow 先于 ctrl 构建）
+  requestAnimationFrame(() => {
+    const row = wrap.closest('.cfg-field');
+    const inp = row?.querySelector(
+      `textarea[data-key="system-proxy"], input[data-key="system-proxy"]`
+    );
+    if (!inp) return;
+
+    const syncVisibility = () => {
+      const isDirect = inp.value.trim().toLowerCase() === 'direct';
+      wrap.style.display = isDirect ? 'none' : '';
+    };
+    inp.addEventListener('input', syncVisibility);
+    syncVisibility(); // 初始同步
+  });
+
+  // 状态渲染
+  function setState(state, msg = '') {
+    btn.disabled = state === 'loading';
+    btn.classList.remove('state-ok', 'state-error', 'state-warn');
+    badge.style.display = msg ? '' : 'none';
+    badge.className = 'cfg-proxy-test-badge';
+
+    switch (state) {
+      case 'loading':
+        btn.innerHTML = `${_SVG_SPIN}<span>检测中…</span>`;
+        break;
+      case 'ok':
+        btn.innerHTML = `${_SVG_PROXY_TEST}<span>检测</span>`;
+        btn.classList.add('state-ok');
+        badge.classList.add('badge-ok');
+        badge.textContent = msg;
+        break;
+      case 'warn':
+        btn.innerHTML = `${_SVG_PROXY_TEST}<span>检测</span>`;
+        btn.classList.add('state-warn');
+        badge.classList.add('badge-warn');
+        badge.textContent = msg;
+        break;
+      case 'error':
+        btn.innerHTML = `${_SVG_PROXY_TEST}<span>检测</span>`;
+        btn.classList.add('state-error');
+        badge.classList.add('badge-error');
+        badge.textContent = msg;
+        break;
+      default:
+        btn.innerHTML = `${_SVG_PROXY_TEST}<span>检测</span>`;
+        badge.style.display = 'none';
+    }
+  }
+
+  // 点击处理
+  btn.addEventListener('click', async () => {
+    const proxyVal = getProxyVal(); // 空值 = 自动检测，具体地址 = 直接检测
+    setState('loading');
+
+    const result = await w.sfetch('/api/proxy/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ proxy: proxyVal }),
+    });
+
+    if (!result?.ok) {
+      const msg = result?.payload?.error ?? result?.error ?? `接口错误 HTTP ${result?.status}`;
+      setState('error', String(msg).slice(0, 50));
+      return;
+    }
+
+    const data = result.payload;
+    if (data?.ok) {
+      // 空值（自动）时：在徽章里显示实际检测的代理地址
+      const label = (proxyVal === '' && data.proxy_used)
+        ? `✓ ${data.proxy_used}  ${data.latency_ms} ms`
+        : `✓ ${data.latency_ms} ms`;
+      badge.title = data.proxy_used ?? '';
+      setState('ok', label);
+    } else {
+      const short = (data?.error ?? '未知错误').slice(0, 50);
+      badge.title = data?.error ?? '';
+      setState('error', `✗ ${short}`);
+    }
+  });
+
+  return wrap;
+}
+
+// _mkGhProxyTestBtn GitHub 代理检测按钮
+function _mkGhProxyTestBtn() {
+  const wrap = el('div', { class: 'cfg-proxy-test-wrap' });
+
+  const btn = el('button', {
+    type: 'button',
+    class: 'cfg-proxy-test-btn',
+    title: '有值只测当前值；为空则从代理组寻优并回填',
+  });
+  btn.innerHTML = `${_SVG_PROXY_TEST}<span>检测</span>`;
+
+  const badge = el('span', { class: 'cfg-proxy-test-badge' });
+  badge.style.display = 'none';
+
+  wrap.append(btn, badge);
+
+  // 状态渲染
+  function setState(state, msg = '') {
+    btn.disabled = state === 'loading';
+    btn.classList.remove('state-ok', 'state-error', 'state-warn');
+    badge.style.display = msg ? '' : 'none';
+    badge.className = 'cfg-proxy-test-badge';
+
+    switch (state) {
+      case 'loading':
+        btn.innerHTML = `${typeof _SVG_SPIN !== 'undefined' ? _SVG_SPIN : '⏳'}<span>检测中…</span>`;
+        break;
+      case 'ok':
+        btn.innerHTML = `${_SVG_PROXY_TEST}<span>检测</span>`;
+        btn.classList.add('state-ok');
+        badge.classList.add('badge-ok');
+        badge.textContent = msg;
+        break;
+      case 'error':
+        btn.innerHTML = `${_SVG_PROXY_TEST}<span>检测</span>`;
+        btn.classList.add('state-error');
+        badge.classList.add('badge-error');
+        badge.textContent = msg;
+        break;
+      default:
+        btn.innerHTML = `${_SVG_PROXY_TEST}<span>检测</span>`;
+        badge.style.display = 'none';
+    }
+  }
+
+  btn.addEventListener('click', async () => {
+    setState('loading');
+
+    // 动态提取当前输入框的值（用户填的最新内容）
+    const inp = wrap.closest('.cfg-field')?.querySelector('[data-key="github-proxy"]');
+    const proxyVal = inp?.value?.trim() ?? '';
+
+    // 发送给后端的请求体携带 proxyVal
+    const result = await w.sfetch('/api/proxy/check-github', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ proxy: proxyVal }),
+    });
+
+    if (!result?.ok) {
+      setState('error', `接口错误 HTTP ${result?.status}`);
+      return;
+    }
+
+    const data = result.payload;
+    if (data?.ok) {
+      const speed = data.speed_kbps > 1024
+        ? `${(data.speed_kbps / 1024).toFixed(1)}MB/s`
+        : `${Math.round(data.speed_kbps)}KB/s`;
+      setState('ok', `✓ ${data.latency_ms}ms · ${speed}`);
+
+      // 组测速寻优后回填，或后端规范化 URL 格式后回填
+      if (inp && data.proxy_used && inp.value !== data.proxy_used) {
+        inp.value = data.proxy_used;
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+        inp.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    } else {
+      const short = (data?.error ?? '未知错误').slice(0, 50);
+      badge.title = data?.error ?? '';
+      setState('error', `✗ ${short}`);
+    }
+  });
+
+  return wrap;
+}
+
+// _mkSubStoreUpdateBtn Sub-Store 立即更新按钮
+function _mkSubStoreUpdateBtn() {
+  const btn = el('button', {
+    type: 'button',
+    class: 'cfg-proxy-test-btn',
+    title: '立即触发 Sub-Store 资源更新',
+  });
+
+  const _SVG_UPDATE = `<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a9 9 0 1 1-2.12-9.36l-3.22 3.22"/></svg>`;
+  const originalHTML = `${_SVG_UPDATE}<span>立即更新</span>`;
+  btn.innerHTML = originalHTML;
+
+  // 轮询检查更新状态
+  async function pollUpdateStatus() {
+    try {
+      const res = await w.sfetch('/api/status');
+      if (res.ok) {
+        if (res.payload.subStoreUpdating) {
+          // 仍在更新中，继续轮询
+          setTimeout(pollUpdateStatus, 1500);
+        } else {
+          // 状态变为 false，说明后端流程走完，去读取携带的更新消息
+          const msg = res.payload.subStoreUpdateMsg || 'Sub-Store 检查更新完毕';
+          // 根据后端返回的文本，简单判断弹窗颜色
+          const isError = msg.includes('失败');
+
+          window.showToast?.(msg, isError ? 'error' : 'success', 5000);
+
+          btn.disabled = false;
+          btn.innerHTML = originalHTML;
+        }
+      } else {
+        setTimeout(pollUpdateStatus, 2000);
+      }
+    } catch (e) {
+      setTimeout(pollUpdateStatus, 2000);
+    }
+  }
+
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    btn.innerHTML = `${typeof _SVG_SPIN !== 'undefined' ? _SVG_SPIN : '⏳'}<span>更新中…</span>`;
+
+    try {
+      const result = await w.sfetch('/api/substore/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      if (!result?.ok) {
+        const msg = result?.payload?.error ?? result?.error ?? '触发失败';
+        window.showToast?.(msg, 'warn', 3000);
+        // 失败直接恢复原状
+        btn.disabled = false;
+        btn.innerHTML = originalHTML;
+      } else {
+        // 成功触发后给出提示，并开始轮询状态
+        const msg = result?.payload?.message ?? '已在后台启动更新流程';
+        window.showToast?.(msg, 'info', 3000);
+        pollUpdateStatus();
+      }
+    } catch (err) {
+      window.showToast?.('网络请求异常', 'error', 3000);
+      btn.disabled = false;
+      btn.innerHTML = originalHTML;
+    }
+  });
+
+  return btn;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   字段行构建
+═══════════════════════════════════════════════════════════════ */
+function mkField(fieldDef, value) {
+  let rawValue = value;
+
+  // 如果值不存在、或为空字符串，且该字段定义了 default 默认值，则进行回填
+  if ((rawValue === undefined || rawValue === null || rawValue === '') && 'default' in fieldDef) {
+    rawValue = fieldDef.default;
+  }
+
+  // 对于数组类型（如 chips, url-list），如果初始不存在，使用 default 数组
+  if ((value === undefined || value === null) && Array.isArray(fieldDef.default)) {
+    rawValue = fieldDef.default;
+  }
+
+  /* 应用加载时的值变换（如 success-rate ×100） */
+  const xf = VALUE_TRANSFORM[fieldDef.key];
+  const displayValue = xf ? xf.load(rawValue) : rawValue;
+
+  const isFull = ['url-list', 'chips', 'cron'].includes(fieldDef.type) || !!fieldDef.fullWidth;
+  const row = el('div', { class: `cfg-field${isFull ? ' full-width' : ''}${fieldDef.type === 'toggle' ? ' cfg-field--toggle' : ''}`, 'data-key': fieldDef.key });
+
+  // ── 提前声明，if/else 两个分支都能访问 ──
+  let labelRow = null;
+
+  if (!isFull) {
+    const labelCol = el('div', { class: 'cfg-label-col' });
+    labelCol.appendChild(el('span', { class: 'cfg-label-text', textContent: fieldDef.label }));
+    // hint 添加code示例
+    if (fieldDef.hint || fieldDef.hintExamples?.length) {
+      labelCol.appendChild(renderHintBlock(fieldDef));
+    }
+    if (fieldDef.links?.length) labelCol.appendChild(mkLinks(fieldDef.links));
+    row.appendChild(labelCol);
+  } else {
+    // url-list 需要在 label 右侧放折行按钮，先占位，ctrl 构建后再填入
+    labelRow = el('div', { class: 'cfg-label-row' });  // const 改为赋值
+    labelRow.appendChild(el('span', { class: 'cfg-label-text', textContent: fieldDef.label }));
+
+    // system-proxy 专属：代理检测按钮
+    if (fieldDef.key === 'system-proxy') {
+      const testBtn = _mkProxyTestBtn(() => {
+        const inp = row.querySelector(`textarea[data-key="system-proxy"], input[data-key="system-proxy"]`);
+        return inp?.value?.trim() ?? '';
+      });
+      labelRow.appendChild(testBtn);
+
+    } else if (fieldDef.key === 'github-proxy') {
+      // github-proxy 专属：GitHub 代理检测按钮
+      const testBtn = _mkGhProxyTestBtn();
+      labelRow.appendChild(testBtn);
+    }
+
+    // 插入立即更新按钮
+    if (fieldDef.key === 'sub-store-update-cron') {
+      const updateBtn = _mkSubStoreUpdateBtn();
+      labelRow.appendChild(updateBtn);
+    }
+
+    row.appendChild(labelRow);
+  }
+
+  const ctrlWrap = el('div', { class: 'cfg-ctrl' });
+  if (fieldDef.ctrlWidth) ctrlWrap.style.maxWidth = fieldDef.ctrlWidth;
+  let ctrl;
+  switch (fieldDef.type) {
+    case 'number': ctrl = mkNumber(fieldDef, displayValue); break;
+    case 'toggle': ctrl = mkToggle(fieldDef.key, displayValue); break;
+    case 'select': ctrl = mkSelect(fieldDef, displayValue); break;
+    case 'chips': ctrl = mkChips(fieldDef, displayValue); break;
+    case 'url-list': ctrl = mkUrlList(fieldDef, displayValue); break;
+    case 'cron': ctrl = mkCronInput(fieldDef, displayValue); break;
+    case 'produce-cron': ctrl = mkProduceCronInput(fieldDef, displayValue); break;
+    default: ctrl = mkInput(fieldDef, displayValue); break;
+  }
+  ctrlWrap.appendChild(ctrl);
+  row.appendChild(ctrlWrap);
+
+  // 从 ctrl（url-list DOM）读取当前所有非空输入
+  function getRecipients(ctrl) {
+    return [...ctrl.querySelectorAll('.cfg-url-item .cfg-url-input')]
+      .map(t => t.value.trim())
+      .filter(Boolean);
+  }
+
+  // url-list 通用逻辑：先把 toggle 放进 labelRow
+  if (fieldDef.type === 'url-list') {
+    const toggle = ctrl?._wrapToggle;
+
+    // 数量徽章与体积徽章
+    const countBadge = el('span', { class: 'cfg-url-count' });
+    const sizeBadge = el('span', { class: 'cfg-url-size' });
+    sizeBadge.style.display = 'none';
+
+    const updateCount = () => {
+      const inputs = ctrl
+        ? [...ctrl.querySelectorAll('.cfg-url-item .cfg-url-input')]
+          .filter(t => t.value.trim() !== '')
+        : [];
+      const n = inputs.length;
+
+      // 更新数量徽章
+      countBadge.textContent = n;
+      countBadge.style.display = n > 0 ? '' : 'none';
+
+      // 没输入内容时直接隐藏体积徽章
+      if (n === 0) {
+        sizeBadge.style.display = 'none';
+        return;
+      }
+
+      // 仅在本地订阅和远程清单上触发体积计算
+      if (fieldDef.key === 'sub-urls' || fieldDef.key === 'sub-urls-remote') {
+        _getReportData().then(report => {
+          if (!report) {
+            sizeBadge.style.display = 'none';
+            return;
+          }
+
+          const formatBytes = (bytes) => {
+            if (!bytes || bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+          };
+
+          // 解析诸如 "6.75 MB"、"710 B" 的格式化文本回真实字节数
+          const parseSizeToBytes = (val) => {
+            if (!val) return 0;
+            if (typeof val === 'number') return val;
+            const m = /^\s*([\d.]+)\s*([KMGTP]?)(?:i?B)?\s*$/i.exec(String(val));
+            if (!m) return 0;
+            const exp = 'KMGTP'.indexOf(m[2].toUpperCase()) + 1;
+            return (parseFloat(m[1]) || 0) * Math.pow(1024, Math.max(0, exp));
+          };
+
+          let totalBytes = 0;
+          let foundAnySize = false;
+
+          const isRemote = fieldDef.key === 'sub-urls-remote';
+          const allSubs = [
+            ...(report.subs_ranking || []),
+            ...(report.subs_ranking_bad || [])
+          ];
+
+          inputs.forEach(t => {
+            const currentUrl = t.value.trim();
+
+            if (isRemote) {
+              const remotes = report.remote_subs || [];
+              const matchedUrl = matchSubUrl(currentUrl, remotes.map(r => r.url));
+              const entry = matchedUrl ? remotes.find(r => r.url === matchedUrl) : null;
+
+              if (entry) {
+                // 借助已有的 buildRemoteAggregate 函数直接获取聚合统计
+                const agg = buildRemoteAggregate(entry, report);
+                if (agg && agg.file_size) {
+                  totalBytes += parseSizeToBytes(agg.file_size);
+                  foundAnySize = true;
+                } else if (entry.bytes || entry.size) { // 兜底容错
+                  totalBytes += Number(entry.bytes || entry.size) || 0;
+                  foundAnySize = true;
+                }
+              }
+            } else {
+              const matchedUrl = matchSubUrl(currentUrl, allSubs.map(s => s.url));
+              const subData = matchedUrl ? allSubs.find(s => s.url === matchedUrl) : null;
+
+              if (subData) {
+                // 处理本地订阅体积（存在于 file_size 文本字段里）
+                if (subData.file_size) {
+                  totalBytes += parseSizeToBytes(subData.file_size);
+                  foundAnySize = true;
+                } else if (subData.bytes || subData.size) { // 兜底容错
+                  totalBytes += Number(subData.bytes || subData.size) || 0;
+                  foundAnySize = true;
+                }
+              }
+            }
+          });
+
+          // 独立更新体积徽章
+          if (foundAnySize) {
+            sizeBadge.textContent = formatBytes(totalBytes);
+            sizeBadge.style.display = '';
+          } else {
+            sizeBadge.style.display = 'none';
+          }
+        }).catch(err => {
+          console.error('Failed to calculate sub volume:', err);
+          sizeBadge.style.display = 'none';
+        });
+      }
+    };
+
+    updateCount();
+    ctrl?.addEventListener('input', updateCount);
+    ctrl?.addEventListener('scp-refresh-stats', updateCount);
+    if (ctrl) {
+      new MutationObserver(updateCount).observe(ctrl, { childList: true, subtree: false });
+    }
+
+    const labelText = labelRow.querySelector('.cfg-label-text');
+    if (labelText) {
+      const group = el('span', { class: 'cfg-label-group' });
+      labelText.replaceWith(group);
+      // 将数量徽章和体积徽章一并插入
+      group.append(labelText, countBadge, sizeBadge);
+    }
+
+    // 右侧按钮容器：测试 + 折行
+    const btnGroup = el('div', { class: 'cfg-label-btn-group' });
+
+    if (fieldDef.key === 'recipient-url') {
+      const testBtn = el('button', {
+        type: 'button',
+        class: 'cfg-url-wrap-toggle cfg-notify-test-btn',
+        title: '发送测试通知',
+      });
+      testBtn.innerHTML = `${_SVG_NOTIFY_TEST}<span>测试</span>`;
+      testBtn.style.display = 'none';
+
+      const syncBtn = () => {
+        updateCount();
+        const n = [...ctrl.querySelectorAll('.cfg-url-item .cfg-url-input')]
+          .filter(t => t.value.trim() !== '').length;
+        testBtn.style.display = n > 0 ? '' : 'none';
+      };
+      ctrl?.addEventListener('input', syncBtn);
+      if (ctrl) {
+        new MutationObserver(syncBtn).observe(ctrl, { childList: true, subtree: false });
+      }
+      syncBtn();
+
+      testBtn.addEventListener('click', async () => {
+        const recipients = [...ctrl.querySelectorAll('.cfg-url-item .cfg-url-input')]
+          .map(t => t.value.trim()).filter(Boolean);
+        if (!recipients.length) return;
+
+        testBtn.disabled = true;
+        testBtn.innerHTML = `${_SVG_SPIN}<span>发送中…</span>`;
+
+        const result = await w.sfetch('/api/notify/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ recipients }),
+        });
+
+        testBtn.disabled = false;
+        testBtn.innerHTML = `${_SVG_NOTIFY_TEST}<span>测试</span>`;
+
+        if (!result?.ok) {
+          window.showToast?.(result?.payload?.error ?? '发送失败', 'warn', 3000);
+          return;
+        }
+        const data = result.payload;
+        const results = data?.results ?? [];
+        const failed = results.filter(r => !r.ok);
+        if (data?.ok) {
+          window.showToast?.(`✓ 全部 ${results.length} 个渠道发送成功`, 'success', 3000);
+        } else {
+          window.showToast?.(
+            `⚠️ ${results.length - failed.length}/${results.length} 成功\n` +
+            failed.map(r => `${r.name}: ${r.error}`).join('\n'),
+            'warn', 5000
+          );
+        }
+      });
+
+      btnGroup.appendChild(testBtn);
+    }
+
+    if (toggle) btnGroup.appendChild(toggle);
+    labelRow.appendChild(btnGroup);
+  }
+
+  // chips：将重置按钮插入 label 行右侧
+  if (fieldDef.type === 'chips') {
+    const resetBtn = ctrl?._resetBtn;
+    if (resetBtn) {
+      row.querySelector('.cfg-label-row')?.appendChild(resetBtn);
+    }
+  }
+
+  // full-width 字段的 hint 仍挂在 row 上（跨全列）
+  // 非 full-width 的 hint 已在上方 labelCol 内添加，此处跳过
+  if (isFull && (fieldDef.hint || fieldDef.hintExamples?.length)) {
+    row.appendChild(renderHintBlock(fieldDef));
+  }
+  if (isFull && fieldDef.links?.length) row.appendChild(mkLinks(fieldDef.links));
+
+  _attachValidator(row, fieldDef);
+  return row;
+}
+
+
+/**
+ * _validateCronSegment — 校验 Cron 单个段（不含逗号）
+ * 支持：* | n | n-m | *\/step | n/step | n-m/step
+ * @returns {string|null} null = 合法；string = 错误描述
+ */
+function _validateCronSegment(seg, fieldIdx) {
+  const { name, min, max } = _CRON_FIELD_RANGES[fieldIdx];
+  const stepMatch = seg.match(/^(.+?)\/(\d+)$/);
+  const base = stepMatch ? stepMatch[1] : seg;
+  const step = stepMatch ? Number(stepMatch[2]) : null;
+
+  if (step !== null && step < 1)
+    return `${name}：步进值必须 ≥ 1`;
+
+  const inRange = n => { const v = Number(n); return Number.isInteger(v) && v >= min && v <= max; };
+
+  if (base === '*') return null;                          // * 或 */n
+
+  const rangeMatch = base.match(/^(\d+)-(\d+)$/);
+  if (rangeMatch) {
+    const [, lo, hi] = rangeMatch;
+    if (!inRange(lo) || !inRange(hi))
+      return `${name}：范围 ${lo}-${hi} 超出 ${min}–${max}`;
+    if (Number(lo) > Number(hi))
+      return `${name}：起始值 ${lo} 大于结束值 ${hi}`;
+    return null;
+  }
+
+  if (/^\d+$/.test(base)) {
+    if (!inRange(base)) return `${name}：${base} 超出范围 ${min}–${max}`;
+    return null;
+  }
+
+  return `${name}：含非法字符 "${base}"`;
+}
+
+/**
+ * _isValidCron — 完整校验（5字段 + 每字段合法）
+ */
+function _isValidCron(expr) {
+  if (!expr?.trim()) return false;
+  const parts = expr.trim().split(/\s+/);
+  if (parts.length !== 5) return false;
+  return parts.every((p, i) =>
+    p.split(',').every(seg => seg.length > 0 && _validateCronSegment(seg, i) === null)
+  );
+}
+
+/**
+ * _validateCronPartial — 只校验已输入的字段（用于实时 input 事件）
+ * 字段数量不足不报错，只校验已有字段的合法性
+ * @returns {string|null}
+ */
+function _validateCronPartial(val) {
+  if (!val?.trim()) return null;
+  const parts = val.trim().split(/\s+/);
+  for (let i = 0; i < Math.min(parts.length, 5); i++) {
+    for (const seg of parts[i].split(',')) {
+      const err = _validateCronSegment(seg, i);
+      if (err) return err;
+    }
+  }
+  return null;
+}
+
+/**
+ * _validateCronFull — 退出时完整校验，包含字段数量检查
+ * @returns {string|null}
+ */
+function _validateCronFull(val) {
+  if (!val?.trim()) return null;
+  const parts = val.trim().split(/\s+/);
+  if (parts.length !== 5)
+    return `需要 5 个字段（分 时 日 月 周），当前 ${parts.length} 个`;
+  return _validateCronPartial(val);
+}
+
+
+/* ═══════════════════════════ Cron ↔ 检测间隔联动 ═══════════════════════
+ * 在 schedule 面板构建完成后调用。
+ * · Cron 合法 → 在 Cron 字段下方显示"定时计划已启用"徽标
+ *               → 检测间隔字段视觉禁用（pointer-events:none + opacity）
+ * · Cron 为空或非法 → 徽标隐藏，检测间隔恢复可用
+ * · 徽标仅 UI 展示，不写入配置
+ * ─────────────────────────────────────────────────────────────────── */
+function _bindCronInterval(panel) {
+  const cronRow = panel.querySelector('.cfg-field[data-key="cron-expression"]');
+  const intervalRow = panel.querySelector('.cfg-field[data-key="check-interval"]');
+  if (!cronRow || !intervalRow) return;
+
+  const cronInput = cronRow.querySelector('input[data-key="cron-expression"]');
+  if (!cronInput) return;
+
+  /* badge 插到 cronRow 内部 hint/links 之后，而非行间 */
+  const badge = el('div', {
+    class: 'cfg-cron-badge',
+    role: 'button',
+    tabindex: '0',
+  });
+  // 追加到 cronRow 末尾（在 .cfg-ctrl 之后）
+  cronRow.appendChild(badge);
+
+  /* 需要禁用的控件 */
+  const intervalControls = [
+    ...intervalRow.querySelectorAll('input[type="number"]'),
+    ...intervalRow.querySelectorAll('button.cfg-step-btn'),
+  ];
+
+  // intervalInput 从 intervalRow 取，保持与 intervalControls 来源一致
+  const intervalInput = intervalRow.querySelector('input[type="number"]');
+
+  function update() {
+    const val = cronInput.value.trim();
+    const isValid = _isValidCron(val);
+    // 暂停态：值为空 且 存有上次的合法值
+    const isPaused = val === '' && !!cronInput.dataset.pausedValue;
+
+    if (isValid) {
+      /* ── 启用态：绿色 ── */
+      badge.className = 'cfg-cron-badge cfg-cron-badge--active';
+      badge.title = '点击暂停定时计划';
+      badge.innerHTML = `${_SVG_CLOCK}<span>定时计划已启用 · 禁用检测间隔</span>`;
+      intervalControls.forEach(c => { c.disabled = true; });
+      intervalRow.classList.add('cfg-field--muted');
+    } else if (isPaused) {
+      /* ── 暂停态：橙色 ── */
+      badge.className = 'cfg-cron-badge cfg-cron-badge--active cfg-cron-badge--paused';
+      badge.title = '点击恢复定时计划';
+      badge.innerHTML = `${_SVG_CLOCK}<span>定时计划已暂停 · 检测间隔生效</span>`;
+      intervalControls.forEach(c => { c.disabled = false; });
+      intervalRow.classList.remove('cfg-field--muted');
+    } else {
+      /* ── 未配置 / 输入中：始终显示，文案根据 check-interval 是否有值区分 ── */
+      const ivVal = intervalInput?.value.trim();
+      const hasInterval = ivVal !== '' && !isNaN(Number(ivVal)) && Number(ivVal) > 0;
+      badge.className = 'cfg-cron-badge cfg-cron-badge--active cfg-cron-badge--paused';
+      badge.title = '点击启用定时计划';
+      badge.innerHTML = hasInterval
+        ? `${_SVG_CLOCK}<span>定时计划未配置 · 检测间隔 ${ivVal} 分钟</span>`
+        : `${_SVG_CLOCK}<span>定时计划未配置 · 检测间隔生效</span>`;
+
+      if (cronInput.dataset.pausedValue)
+        intervalControls.forEach(c => { c.disabled = false; });
+      intervalRow.classList.remove('cfg-field--muted');
+    }
+  }
+
+  // check-interval 值变化时同步更新 badge 文案
+  intervalInput?.addEventListener('input', update);
+
+  function toggleCron() {
+    const val = cronInput.value.trim();
+    if (_isValidCron(val)) {
+      /* 启用 → 暂停：存档当前值，清空 */
+      cronInput.dataset.pausedValue = val;
+      cronInput.value = '';
+    } else if (val === '' && cronInput.dataset.pausedValue) {
+      /* 暂停（存档）→ 恢复 */
+      cronInput.value = cronInput.dataset.pausedValue;
+      delete cronInput.dataset.pausedValue;
+    } else if (val === '') {
+      /* 未配置 → 启用：用 placeholder 作为默认值填入 */
+      cronInput.value = cronInput.placeholder || '0 4 */2 * *';
+      delete cronInput.dataset.pausedValue;
+    } else {
+      return; // 输入中但非法，不响应
+    }
+    cronInput.dispatchEvent(new Event('input'));
+    cronInput.dispatchEvent(new Event('cfg-cron-refresh'));
+    requestAnimationFrame(update);
+
+    requestAnimationFrame(() => window.saveConfigWithValidation?.());
+  }
+
+  badge.addEventListener('click', toggleCron);
+  badge.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCron(); }
+  });
+
+  cronInput.addEventListener('input', () => {
+    // 用户手动输入时，若非空则清除暂停存储，防止误恢复到旧值
+    if (cronInput.value.trim() !== '') delete cronInput.dataset.pausedValue;
+    update();
+  });
+
+  requestAnimationFrame(update);
+}
+
+/* ═══════════════════════════ ISP 检测联动 ═══════════════════════
+ * 当 isp-check 为 false 时，隐藏其余相关字段以节省空间
+ * 开启时，若未填写任何 API Key，则给出警告提示；输入后动态刷新提示
+ * ─────────────────────────────────────────────────────────────────── */
+function _bindIspCheck(panel) {
+  const toggleRow = panel.querySelector('.cfg-field[data-key="isp-check"]');
+  if (!toggleRow) return;
+
+  const cb = toggleRow.querySelector('input[type="checkbox"][data-key="isp-check"]');
+  if (!cb) return;
+
+  const apiKeys = [
+    'isp-check-api-key-ipapi',
+    'isp-check-api-key-proxycheck',
+    'isp-check-api-key-iplocate',
+    'isp-check-api-key-ipdata'
+  ];
+  // 需要被联动隐藏/显示的全部目标
+  const allTargets = ['isp-timeout', ...apiKeys];
+
+  function update() {
+    const active = cb.checked;
+    allTargets.forEach(key => {
+      const row = panel.querySelector(`.cfg-field[data-key="${key}"]`);
+      if (!row) return;
+      row.style.display = active ? '' : 'none';
+    });
+
+    // 主动触发一次开关的 input 事件，用以执行 FIELD_VALIDATORS 刷新提示
+    cb.dispatchEvent(new Event('input'));
+  }
+
+  cb.addEventListener('change', update);
+
+  // 监听所有 API Key 输入框，任何一个被编辑，都去重新校验一遍开关状态
+  apiKeys.forEach(key => {
+    const input = panel.querySelector(`input[data-key="${key}"]`);
+    if (input) {
+      input.addEventListener('input', () => {
+        if (cb.checked) cb.dispatchEvent(new Event('input'));
+      });
+    }
+  });
+
+  requestAnimationFrame(update); // 初始化时执行一次同步状态
+}
+
+/* ═══════════════════════════ DNS 解析联动 ═══════════════════════
+ * 1. 当 sub-process.resolve-domain.enable 为 false 时，隐藏其余相关字段
+ * 2. 开启节点裂变时，自动开启 DNS 解析并记录状态；关闭裂变时恢复原状
+ * 3. 选中 Custom 选项时，单独显示 custom-url 字段
+ * ─────────────────────────────────────────────────────────────────── */
+function _bindDnsResolve(panel) {
+  const toggleRow = panel.querySelector('.cfg-field[data-key="sub-process.resolve-domain.enable"]');
+  if (!toggleRow) return;
+
+  const cb = toggleRow.querySelector('input[type="checkbox"][data-key="sub-process.resolve-domain.enable"]');
+  if (!cb) return;
+
+  // 抓取 provider 的 select 元素
+  const providerSel = panel.querySelector('select.cfg-select-native[data-key="sub-process.resolve-domain.provider"]');
+
+  const targetKeys = [
+    'sub-process.resolve-domain.provider',
+    'sub-process.resolve-domain.custom-url', // <- 将新字段加入受控列表
+    'sub-process.resolve-domain.type',
+    'sub-process.resolve-domain.cache',
+    'sub-process.resolve-domain.cache-ttl',
+    'sub-process.resolve-domain.edns',
+    'sub-process.resolve-domain.concurrency',
+    'sub-process.resolve-domain.timeout'
+  ];
+
+  function update() {
+    const active = cb.checked;
+    const isCustom = providerSel && providerSel.value === 'Custom';
+
+    targetKeys.forEach(key => {
+      const row = panel.querySelector(`.cfg-field[data-key="${key}"]`);
+      if (!row) return;
+
+      if (!active) {
+        // 总开关没开，一律隐藏
+        row.style.display = 'none';
+      } else {
+        // 总开关开启的情况下，单独控制 custom-url 的显示
+        if (key === 'sub-process.resolve-domain.custom-url') {
+          row.style.display = isCustom ? '' : 'none';
+        } else {
+          row.style.display = '';
+        }
+      }
+    });
+
+    // 联动触发 node-split 的实时校验更新
+    const nodeSplitCb = panel.querySelector('input[type="checkbox"][data-key="sub-process.node-split"]');
+    if (nodeSplitCb) {
+      nodeSplitCb.dispatchEvent(new Event('input'));
+    }
+  }
+
+  // 监听 DNS 解析开关手动变化
+  cb.addEventListener('change', (e) => {
+    if (e.isTrusted) {
+      delete cb.dataset.autoEnabledBySplit;
+    }
+    update();
+  });
+
+  // 监听 DNS provider 的下拉框变化
+  if (providerSel) {
+    providerSel.addEventListener('change', update);
+  }
+
+  // 监听节点裂变开关的变化
+  const splitCb = panel.querySelector('input[type="checkbox"][data-key="sub-process.node-split"]');
+  if (splitCb) {
+    splitCb.addEventListener('change', () => {
+      if (splitCb.checked) {
+        if (!cb.checked) {
+          cb.dataset.autoEnabledBySplit = 'true';
+          cb.checked = true;
+          cb.dispatchEvent(new Event('change')); // 触发 UI 更新
+        }
+      } else {
+        if (cb.dataset.autoEnabledBySplit === 'true') {
+          cb.checked = false;
+          delete cb.dataset.autoEnabledBySplit;
+          cb.dispatchEvent(new Event('change')); // 触发 UI 更新
+        }
+      }
+    });
+  }
+
+  requestAnimationFrame(update); // 初始化时同步一次显示状态
+}
+
+/* ═══════════════════════════ 面板构建 ═══════════════════════════ */
+function buildPanel(tabId) {
+  const panel = document.getElementById(`panel-${tabId}`); if (!panel) return;
+  const schema = SCHEMA.find(s => s.tab === tabId); if (!schema) return;
+  panel.innerHTML = '';
+
+  // 使用 DocumentFragment 在内存中组装 DOM，避免引发疯狂重绘
+  const frag = document.createDocumentFragment();
+
+  for (const sec of schema.sections) {
+    if (sec.conditional) {
+      const group = el('div', { class: 'cfg-cond-group', 'data-cond': sec.conditional });
+      group.appendChild(el('div', { class: 'cfg-section', textContent: sec.title }));
+      sec.fields.forEach(f => group.appendChild(mkField(f, _cfg[f.key])));
+      group.style.display = 'none';
+      frag.appendChild(group);
+    } else {
+      frag.appendChild(el('div', { class: 'cfg-section', textContent: sec.title }));
+      sec.fields.forEach(f => frag.appendChild(mkField(f, _cfg[f.key])));
+    }
+  }
+
+  // 所有节点拼装完毕后，先一次性上树！
+  // 必须在绑定事件前进行，因为 appendChild 后 frag 会被清空
+  panel.appendChild(frag);
+
+  /* 存储：条件分组切换 */
+  if (tabId === 'storage') {
+    // 节点已上树，改回使用 panel 进行查询和绑定
+    const sel = panel.querySelector('select.cfg-select-native[data-key="save-method"]');
+    if (sel) {
+      const sync = m => panel.querySelectorAll('.cfg-cond-group[data-cond]').forEach(g => {
+        g.style.display = (g.dataset.cond === m) ? '' : 'none';
+      });
+      sel.addEventListener('change', () => sync(sel.value));
+      sync(sel.value);
+    }
+
+    /* DNS 解析及节点裂变联动 */
+    _bindDnsResolve(panel);
+  }
+
+  /* 任务：Cron ↔ 检测间隔联动 */
+  if (tabId === 'schedule') {
+    _bindCronInterval(panel);
+  }
+
+  /* 检测：ISP 状态联动 */
+  if (tabId === 'detection') {
+    _bindIspCheck(panel);
+  }
+
+  _built.add(tabId);
+}
+
+/* ════════════════════════════════════════════════════════════
+   模式切换按钮外观同步
+   ─────────────────────────────────────────────────────────
+   · form 模式：按钮显示表单图标 + "表单"，使用 .active 样式
+   · yaml 模式：按钮显示 YAML 图标 + "YAML"，使用 .active-yaml 样式
+════════════════════════════════════════════════════════════ */
+function _updateModeToggle(mode) {
+  const btn = document.getElementById('cfgModeToggle');
+  if (!btn) return;
+  const isYaml = mode === 'yaml';
+  btn.innerHTML = isYaml
+    ? `${_SVG_MODE_FORM}<span>表单</span>`
+    : `${_SVG_MODE_YAML}<span>YAML</span>`;
+  btn.classList.toggle('active', !isYaml);
+  btn.classList.toggle('active-yaml', isYaml);
+  btn.title = isYaml ? '切换到表单模式' : '切换到 YAML 编辑器';
+}
+
+/**
+ * _getScrollContainer — 找到面板实际使用的滚动容器
+ * · 若面板自身可滚动（overflow auto/scroll 且内容超出）→ 返回面板自身
+ * · 否则向上找第一个可滚动祖先
+ * · 都找不到则返回 panel 本身（兜底，操作无害）
+ */
+function _getScrollContainer(panel) {
+  // 先检查面板自身
+  const selfStyle = getComputedStyle(panel);
+  if (['auto', 'scroll'].includes(selfStyle.overflowY) ||
+    ['auto', 'scroll'].includes(selfStyle.overflow)) {
+    return panel;
+  }
+  // 向上查找可滚动祖先
+  let el = panel.parentElement;
+  while (el && el !== document.documentElement) {
+    const s = getComputedStyle(el);
+    if (['auto', 'scroll'].includes(s.overflowY) ||
+      ['auto', 'scroll'].includes(s.overflow)) {
+      return el;
+    }
+    el = el.parentElement;
+  }
+  return panel; // 兜底
+}
+
+/* ════════════════════════════════════════════════════════════
+   DOM 状态同步
+════════════════════════════════════════════════════════════ */
+function applyPanels() {
+  const tabBar = document.getElementById('cfgTabBar');
+  const panelsWrap = document.getElementById('cfgPanels');
+  const splitBtn = document.getElementById('splitViewBtn');
+  if (!tabBar) return;
+
+  /* 只有双槽均有内容时才真正进入 split-mode；
+   单槽时保持 _splitOn=true 但视觉上铺满单列，
+   防止 split-mode 的 flex 布局让空面板撑开空白 */
+  // 用显示阈值，让手动开启的双栏在 280-340 也能生效
+  const isSplit = _splitOn && _canShowSplitBtn() && Boolean(_leftTab) && Boolean(_rightTab);
+
+  tabBar.querySelectorAll('.cfg-tab[data-tab]').forEach(t => {
+    const id = t.dataset.tab;
+    t.classList.toggle('active', id === _leftTab);
+    t.classList.toggle('active-right', isSplit && id === _rightTab);
+    t.setAttribute('aria-selected', String(
+      id === _leftTab || (isSplit && id === _rightTab)
+    ));
+  });
+
+  // ── 第一遍：先保存所有「即将失活」面板的滚动位置 ──
+  // 必须在 class 变更前读取，否则 display:none 会让 scrollTop 归零
+  const toActivate = [];
+  document.querySelectorAll('#cfgPanels .cfg-panel').forEach(p => {
+    const id = p.id.replace('panel-', '');
+    const wasActive = p.classList.contains('active') || p.classList.contains('active-right');
+    const willActive = id === _leftTab || (isSplit && id === _rightTab);
+
+    if (wasActive && !willActive) {
+      // 面板仍可见时读取滚动位置，存入缓存
+      const scroller = _getScrollContainer(p);
+      _scrollCache.set(id, scroller.scrollTop);
+    }
+
+    if (!wasActive && willActive) {
+      toActivate.push({ p, id });
+    }
+  });
+
+  // ── 第二遍：切换 class（此后不可见面板的 scrollTop 可能被浏览器重置）──
+  document.querySelectorAll('#cfgPanels .cfg-panel').forEach(p => {
+    const id = p.id.replace('panel-', '');
+    p.classList.toggle('active', id === _leftTab);
+    p.classList.toggle('active-right', isSplit && id === _rightTab);
+  });
+
+  // ── 第三遍：恢复「新激活」面板的滚动位置 ──
+  // requestAnimationFrame 确保面板已经 display:block、尺寸已确定后再设置
+  toActivate.forEach(({ p, id }) => {
+    const restore = () => {
+      const scroller = _getScrollContainer(p);
+      if (_rememberScroll && _scrollCache.has(id)) {
+        scroller.scrollTop = _scrollCache.get(id);
+      } else {
+        scroller.scrollTop = 0;
+      }
+    };
+    // 若 scroller 是共享父容器，需等渲染完成后设置
+    requestAnimationFrame(restore);
+  });
+
+  panelsWrap?.classList.toggle('split-mode', isSplit);
+
+  /* 双栏按钮状态同步：active 状态 + aria-pressed */
+  if (splitBtn) {
+    splitBtn.classList.toggle('split-active', _splitOn && _canShowSplitBtn());
+    splitBtn.setAttribute('aria-pressed', String(_splitOn && _canShowSplitBtn()));
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   公开 API
+════════════════════════════════════════════════════════════ */
+
+/**
+ * initConfigForm()
+ */
+export function initConfigForm() {
+  const tabBar = document.getElementById('cfgTabBar');
+  const splitBtn = document.getElementById('splitViewBtn');
+  const editorContainer = document.getElementById('editorContainer');
+  if (!tabBar) return;
+
+  const allTabIds = () =>
+    [...tabBar.querySelectorAll('.cfg-tab[data-tab]')].map(t => t.dataset.tab);
+
+  /* ── 初始布局 ─────────────────────────────────────────── */
+  function autoInit() {
+    const ids = allTabIds();
+    if (ids.length === 0) return;
+
+    if (_canSplit()) {
+      _splitOn = true;
+      _leftTab = ids[0];
+      _rightTab = ids[1] ?? ids[0];
+      _lastTab = _leftTab;
+      if (!_built.has(_leftTab)) buildPanel(_leftTab);
+      if (!_built.has(_rightTab)) buildPanel(_rightTab);
+    } else {
+      _splitOn = false;
+      _leftTab = ids[0];
+      _rightTab = null;
+      _lastTab = _leftTab;
+      if (!_built.has(_leftTab)) buildPanel(_leftTab);
+    }
+    applyPanels();
+  }
+
+  /* ── Tab 点击 ─────────────────────────────────────────── */
+  function activateTab(id) {
+    if (!_built.has(id)) buildPanel(id);
+
+    // 改为 _canShowSplitBtn()，与 applyPanels / toggleSplit 保持一致
+    if (!_splitOn || !_canShowSplitBtn()) {
+      _leftTab = id;
+      _lastTab = id;
+      applyPanels();
+      return;
+    }
+
+    const isLeft = id === _leftTab;
+    const isRight = id === _rightTab;
+
+    if (isLeft || isRight) {
+      if (isLeft) {
+        // 左槽被清空：将右槽提升到左槽，右槽等待填入
+        _leftTab = _rightTab;
+        _rightTab = null;
+        _pendingSlot = 'right';
+      } else {
+        _rightTab = null;
+        _pendingSlot = 'right';
+      }
+    } else {
+      const slot = (_leftTab === null ? 'left' : null)
+        ?? _pendingSlot
+        ?? (_rightTab === null ? 'right' : null)
+        ?? 'right';
+
+      if (slot === 'left') _leftTab = id;
+      else _rightTab = id;
+
+      _pendingSlot = null;
+      _lastTab = id;
+    }
+
+    applyPanels();
+  }
+
+  /* ── 双栏按钮 ─────────────────────────────────────────── */
+  function toggleSplit() {
+    if (!_canShowSplitBtn()) return; // 按钮不可见时不响应
+    if (!_canSplit()) {
+      // 280-340 区间：手动强制开启，但告知可能偏窄
+      // window.showToast?.('窗口略窄，双栏已开启但显示可能偏紧', 'info', 2500);
+    }
+
+    _splitOn = !_splitOn;
+
+    if (_splitOn) {
+      const ids = allTabIds();
+      const cur = _leftTab ?? ids[0];
+      const curIdx = ids.indexOf(cur);
+      _leftTab = cur;
+      _rightTab = ids[(curIdx + 1) % ids.length];
+      _pendingSlot = null;
+      _lastTab = _leftTab;
+      if (!_built.has(_leftTab)) buildPanel(_leftTab);
+      if (!_built.has(_rightTab)) buildPanel(_rightTab);
+      window.showToast?.('已开启双栏 · 点击正在显示的 Tab 可关闭该槽', 'info', 3000);
+    } else {
+      _leftTab = _lastTab ?? _leftTab ?? allTabIds()[0];
+      _rightTab = null;
+      _pendingSlot = null;
+      window.showToast?.('已关闭双栏模式', 'info', 2000);
+    }
+
+    applyPanels();
+  }
+
+  /* ── splitBtn / 模式切换按钮可见性 ──────────────────────── */
+  function updateSplitBtnVisibility() {
+    if (!splitBtn) return;
+    const isYaml = editorContainer?.classList.contains('editor-mode-yaml') ?? false;
+    const show = !isYaml && _canShowSplitBtn();
+    splitBtn.style.display = show ? '' : 'none';
+    // 分隔线与双栏按钮同步显隐
+    const divider = document.getElementById('splitDivider');
+    if (divider) divider.style.display = show ? '' : 'none';
+  }
+
+  /* ── 模式切换：单按钮逻辑 ─────────────────────────────────
+   * 1. 直接切换 class（保证始终生效）
+   * 2. 仅切换到 YAML 时触发 compat click（CodeMirror init 等副作用）
+   *    切换回表单时不触发——admin.js 可能再次切换 class 造成状态污染
+   * 3. 后续由 MutationObserver 统一处理 UI / 双栏状态
+   * ─────────────────────────────────────────────────────── */
+  const modeToggle = document.getElementById('cfgModeToggle');
+  if (modeToggle && editorContainer) {
+    modeToggle.addEventListener('click', () => {
+      const isYaml = editorContainer.classList.contains('editor-mode-yaml');
+      const targetMode = isYaml ? 'form' : 'yaml';
+      editorContainer.classList.remove('editor-mode-yaml', 'editor-mode-form');
+      editorContainer.classList.add(`editor-mode-${targetMode}`);
+      if (!isYaml) {
+        requestAnimationFrame(() => {
+          const yamlBtn = document.getElementById('_cfgBtnYaml');
+          if (yamlBtn) yamlBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        });
+      }
+    });
+  }
+
+  /* ── MutationObserver：监听 YAML/表单 class 切换 ─────────────
+   * 进入 YAML → 退出双栏，隐藏双栏按钮
+   * 返回表单 → 按当前宽度重新计算双栏状态，恢复按钮显隐
+   * ─────────────────────────────────────────────────────────── */
+  if (editorContainer) {
+    new MutationObserver(() => {
+      const isYaml = editorContainer.classList.contains('editor-mode-yaml');
+      _updateModeToggle(isYaml ? 'yaml' : 'form');
+      updateSplitBtnVisibility();
+
+      if (isYaml) {
+        if (_splitOn) {
+          _splitOn = false;
+          _leftTab = _lastTab ?? _leftTab ?? allTabIds()[0];
+          _rightTab = null;
+          _pendingSlot = null;
+          applyPanels();
+        }
+      } else {
+        /* 返回表单：按当前宽度重新决定双栏状态（不依赖历史意图） */
+        const shouldAutoSplit = _canSplit();
+        const canShow = _canShowSplitBtn();
+        if (shouldAutoSplit && !_splitOn) {
+          const ids = allTabIds();
+          const cur = _leftTab ?? ids[0];
+          const curIdx = ids.indexOf(cur);
+          _leftTab = cur;
+          _rightTab = ids[(curIdx + 1) % ids.length];
+          _pendingSlot = null;
+          _lastTab = _leftTab;
+          _splitOn = true;
+          if (!_built.has(_leftTab)) buildPanel(_leftTab);
+          if (!_built.has(_rightTab)) buildPanel(_rightTab);
+        } else if (!canShow && _splitOn) {
+          // 窗口太窄，强制关闭
+          _splitOn = false;
+          _leftTab = _lastTab ?? _leftTab ?? allTabIds()[0];
+          _rightTab = null;
+          _pendingSlot = null;
+        }
+        applyPanels();
+      }
+    }).observe(editorContainer, { attributes: true, attributeFilter: ['class'] });
+  }
+
+  /* ── 事件绑定 ─────────────────────────────────────────── */
+  tabBar.addEventListener('click', e => {
+    const btn = e.target.closest('.cfg-tab[data-tab]');
+    if (btn) activateTab(btn.dataset.tab);
+  });
+
+  if (splitBtn) splitBtn.addEventListener('click', toggleSplit);
+
+  // YAML 按钮点击 → 立即隐藏双栏按钮并退出双栏
+  document.querySelector('#cfgModeBar [data-mode="yaml"]')
+    ?.addEventListener('click', () => {
+      if (splitBtn) splitBtn.style.display = 'none';
+      if (_splitOn) {
+        _splitOn = false;
+        _leftTab = _lastTab ?? _leftTab ?? allTabIds()[0];
+        _rightTab = null;
+        _pendingSlot = null;
+        applyPanels();
+      }
+    });
+
+  // 按宽度恢复双栏按钮
+  document.querySelector('#cfgModeBar [data-mode="form"]')
+    ?.addEventListener('click', () => {
+      if (_canSplit() && splitBtn) splitBtn.style.display = '';
+      applyPanels();
+    });
+
+
+  //  宽度不足时关闭双栏，宽度恢复时自动开启双栏
+  window.addEventListener('resize', () => {
+    clearTimeout(_resizeTimer);
+    _resizeTimer = setTimeout(() => {
+      const isYaml = editorContainer?.classList.contains('editor-mode-yaml') ?? false;
+
+      if (!_canShowSplitBtn() && _splitOn) {
+        // 连按钮都不该显示了，强制关闭
+        _splitOn = false;
+        _leftTab = _lastTab ?? _leftTab ?? allTabIds()[0];
+        _rightTab = null;
+        _pendingSlot = null;
+      } else if (_canSplit() && !_splitOn && !isYaml) {
+        // 宽度恢复且不在 YAML 模式 → 自动开启
+        const ids = allTabIds();
+        const cur = _leftTab ?? ids[0];
+        const curIdx = ids.indexOf(cur);
+        _leftTab = cur;
+        _rightTab = ids[(curIdx + 1) % ids.length];
+        _pendingSlot = null;
+        _lastTab = _leftTab;
+        _splitOn = true;
+        if (!_built.has(_leftTab)) buildPanel(_leftTab);
+        if (!_built.has(_rightTab)) buildPanel(_rightTab);
+      }
+
+      updateSplitBtnVisibility();
+      applyPanels();
+    }, 150);
+  }, { passive: true });
+
+
+  /* 初始化 */
+  updateSplitBtnVisibility();
+  _updateModeToggle('form'); /* 默认表单模式 */
+  autoInit();
+  updateSplitBtnVisibility();
+
+  // 初始化胶囊 hover mini 提示
+  initMiniHoverTooltip();
+
+  // 静默预加载订阅报告数据
+  _getReportData().catch(() => { });
+
+}
+
+
+/**
+ * renderConfigForm(configObj)
+ */
+export function renderConfigForm(configObj) {
+  _cfg = _flattenCfg(configObj ?? {});
+  _built.clear();
+  _scrollCache.clear(); // 配置重载时清空滚动缓存
+
+  const toRebuild = new Set([_leftTab, _rightTab].filter(Boolean));
+  if (toRebuild.size === 0) {
+    _leftTab = SCHEMA[0].tab;
+    toRebuild.add(_leftTab);
+  }
+  toRebuild.forEach(id => buildPanel(id));
+
+  applyPanels();
+}
+
+/**
+ * collectConfigForm()
+ */
+export function collectConfigForm() {
+  const result = { ..._cfg };
+  for (const { tab } of SCHEMA) {
+    if (_built.has(tab)) Object.assign(result, collectPanel(tab));
+  }
+
+  // 表单数据被收集（用于保存）时，清除自动联动的临时标记
+  // 这样即使用户保存后系统没有重绘 DOM，临时联动关系也会被彻底解除
+  document.querySelectorAll('[data-auto-enabled-by-split]').forEach(el => {
+    delete el.dataset.autoEnabledBySplit;
+  });
+
+  return _unflattenCfg(result);
+}
+
+function collectPanel(tabId) {
+  const panel = document.getElementById(`panel-${tabId}`); if (!panel || !_built.has(tabId)) return {};
+  const schema = SCHEMA.find(s => s.tab === tabId); if (!schema) return {};
+  const out = {};
+  for (const sec of schema.sections) {
+    for (const field of sec.fields) {
+      const { key, type } = field;
+      switch (type) {
+        case 'toggle': { const cb = panel.querySelector(`input[type="checkbox"][data-key="${key}"]`); if (cb) out[key] = cb.checked; break; }
+        case 'number': {
+          const inp = panel.querySelector(`input[type="number"][data-key="${key}"]`);
+          if (inp) {
+            /* 应用保存时的值变换（如 success-rate ÷100） */
+            const xf = VALUE_TRANSFORM[key];
+            if (xf) {
+              out[key] = xf.save(inp.value);
+            } else {
+              const v = parseFloat(inp.value);
+              out[key] = isNaN(v) ? 0 : v;
+            }
+          }
+          break;
+        }
+        case 'select': {
+          const sel = panel.querySelector(`select.cfg-select-native[data-key="${key}"]`);
+          if (sel) {
+            const raw = field.numericOptions ? parseFloat(sel.value) : sel.value;
+            const xf = VALUE_TRANSFORM[key];
+            out[key] = xf ? xf.save(raw) : raw;  // ← 新增 xf 判断
+          }
+          break;
+        }
+        case 'chips': {
+          const w = panel.querySelector(`.cfg-chips[data-key="${key}"]`);
+          if (w) out[key] = Array.from(w.querySelectorAll('input:checked')).map(c => c.value);
+          break;
+        }
+        case 'url-list': {
+          const w = panel.querySelector(`.cfg-url-list[data-key="${key}"]`);
+          if (w) {
+            const raw = Array.from(w.querySelectorAll('.cfg-url-item .cfg-url-input'))
+              .flatMap(t => t.value.split('\n'))
+              .map(s => s.trim()
+                .replace(/\x08/g, '\\b')
+                .replace(/\t/g, '\\t')
+              )
+              .filter(Boolean);
+
+            // 如果该字段定义了转换器，保存前执行转换（如 Map -> List）
+            const xf = VALUE_TRANSFORM[key];
+            out[key] = xf ? xf.save(raw) : raw;
+          }
+          break;
+        }
+        default: {
+          /* text / password：适配 input 和 textarea */
+          const inp = panel.querySelector(`input[data-key="${key}"], textarea[data-key="${key}"]`);
+          if (inp) out[key] = inp.value;
+          break;
+        }
+      }
+    }
+  }
+  return out;
+}
+
+export { FIELD_VALIDATORS };

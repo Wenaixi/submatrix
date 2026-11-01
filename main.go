@@ -1,19 +1,37 @@
+//go:generate go-winres make --in winres/winres.json --product-version=git-tag --file-version=git-tag --arch=amd64,386,arm64
 package main
 
 import (
-	"fmt"
+	"errors"
+	"flag"
 	"log/slog"
 	"os"
 
-	"github.com/beck-8/subs-check/app"
+	"github.com/sinspired/subs-check-pro/v3/app"
+)
+
+// 命令行参数
+var (
+	flagConfigPath = flag.String("f", "", "配置文件路径")
 )
 
 func main() {
-	application := app.New(fmt.Sprintf("%s-%s", Version, CurrentCommit))
-	slog.Info(fmt.Sprintf("当前版本: %s-%s", Version, CurrentCommit))
+	// 解析命令行参数
+	flag.Parse()
+
+	// 初始化应用
+	fullVersion := Version + "-" + CurrentCommit
+	application := app.New(Version, fullVersion, *flagConfigPath)
+	// 版本更新成功通知
+	application.InitUpdateInfo()
+	slog.Info("当前版本", "Version", fullVersion)
 
 	if err := application.Initialize(); err != nil {
-		slog.Error(fmt.Sprintf("初始化失败: %v", err))
+		if errors.Is(err, app.ErrFirstRun) {
+			slog.Info("请再次运行以加载配置")
+			os.Exit(0)
+		}
+		slog.Error("初始化失败", "error", err)
 		os.Exit(1)
 	}
 

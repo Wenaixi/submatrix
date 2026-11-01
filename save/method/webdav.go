@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"net/url"
 	"time"
 
-	"log/slog"
-
-	"github.com/beck-8/subs-check/config"
+	"github.com/sinspired/subs-check-pro/v3/config"
+	"github.com/sinspired/subs-check-pro/v3/utils"
 )
 
 var (
@@ -27,8 +28,43 @@ type WebDAVUploader struct {
 
 // NewWebDAVUploader 创建新的 WebDAV 上传器
 func NewWebDAVUploader() *WebDAVUploader {
+	webdavURL := config.GlobalConfig.WebDAVURL
+	if _, err := url.Parse(webdavURL); err != nil {
+		slog.Error("WebDAV URL 配置错误，无法解析", "url", webdavURL, "error", err)
+		return nil
+	}
+
+	transport := &http.Transport{}
+
+	if utils.IsLocalURL(webdavURL) {
+		slog.Debug("WebDAV 地址为本地或私有地址，将不使用代理", "URL", webdavURL)
+		transport.Proxy = nil
+	} else {
+		useProxy := utils.GetSysProxy()
+
+		if useProxy {
+			proxyStr := config.GlobalConfig.SystemProxy
+			slog.Debug("将为远程 WebDAV 配置代理", "URL", webdavURL, "proxy", proxyStr)
+			proxyURL, perr := url.Parse(proxyStr)
+			if perr != nil {
+				slog.Error("解析配置中的代理 URL 失败，将不使用代理", "proxy_url", proxyStr, "error", perr)
+				transport.Proxy = nil
+			} else {
+				transport.Proxy = http.ProxyURL(proxyURL)
+			}
+		} else {
+			slog.Debug("未配置系统代理，将直连远程 WebDAV", "URL", webdavURL)
+			transport.Proxy = nil
+		}
+	}
+
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   30 * time.Second,
+	}
+
 	return &WebDAVUploader{
-		client:   &http.Client{Timeout: 30 * time.Second},
+		client:   client,
 		baseURL:  config.GlobalConfig.WebDAVURL,
 		username: config.GlobalConfig.WebDAVUsername,
 		password: config.GlobalConfig.WebDAVPassword,
@@ -82,7 +118,7 @@ func (w *WebDAVUploader) validateInput(yamlData []byte, filename string) error {
 func (w *WebDAVUploader) uploadWithRetry(yamlData []byte, filename string) error {
 	var lastErr error
 
-	for attempt := 0; attempt < webdavMaxRetries; attempt++ {
+	for attempt := range webdavMaxRetries {
 		if err := w.doUpload(yamlData, filename); err != nil {
 			lastErr = err
 			slog.Error(fmt.Sprintf("webdav上传失败(尝试 %d/%d) %v", attempt+1, webdavMaxRetries, err))

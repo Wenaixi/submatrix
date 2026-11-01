@@ -1,122 +1,169 @@
 package platform
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"math/rand/v2"
 	"net/http"
-	"sync/atomic"
+	"strconv"
+	"strings"
 	"time"
 
-	"log/slog"
-
-	"github.com/beck-8/subs-check/config"
 	"github.com/juju/ratelimit"
 	"github.com/metacubex/mihomo/common/convert"
+	"github.com/sinspired/subs-check-pro/v3/config"
 )
 
-// networkLimitedReader 基于网络层字节计数器的大小限制 reader
-type networkLimitedReader struct {
-	reader       io.Reader
-	bytesCounter *uint64
-	startBytes   uint64
-	limit        uint64
+var testURLs []string
+
+func init() {
+	if len(fastSpeedTestURLs) > 0 {
+		testURLs = fastSpeedTestURLs
+	}
 }
 
-func (r *networkLimitedReader) Read(p []byte) (n int, err error) {
-	if r.limit > 0 {
-		currentBytes := atomic.LoadUint64(r.bytesCounter)
-		networkRead := currentBytes - r.startBytes
+// networkLimitedReader 负责在读取 Body 时检查底层网络流量是否超限
+type networkLimitedReader struct {
+	reader      io.Reader
+	getNetBytes func() uint64 // 获取底层原子计数
+	startBytes  uint64        // 初始读数
+	limit       uint64        // 限制阈值 (0为不限制)
+}
 
-		if networkRead >= r.limit {
+func (r *networkLimitedReader) Read(p []byte) (int, error) {
+	// 只有在限制启用且能获取底层流量时才进行拦截逻辑
+	if r.limit > 0 && r.getNetBytes != nil {
+		curr := r.getNetBytes()
+
+		// 防御性处理：计数器回绕（极罕见）
+		if curr < r.startBytes {
+			r.startBytes = curr
+		}
+
+		readBytes := curr - r.startBytes
+
+		// 检查是否已经超限
+		if readBytes >= r.limit {
 			return 0, io.EOF
 		}
 
-		// 限制本次读取的大小（粗略控制，因为网络层可能读取更多）
-		if remaining := r.limit - networkRead; remaining < uint64(len(p)) {
+		// 截断 p 的长度，防止最后一次读取导致总流量大幅超出 limit
+		// io.Copy 默认 buffer 是 32KB，如果不截断，可能会多读几十 KB
+		remaining := r.limit - readBytes
+		if uint64(len(p)) > remaining {
 			p = p[:remaining]
 		}
 	}
 	return r.reader.Read(p)
 }
 
-// CheckSpeed downloads speedTestURL through httpClient and returns the measured
-// throughput. The URL is passed in explicitly (rather than read from
-// config.GlobalConfig) so a run captured at pipeline start stays consistent
-// even if the user edits SpeedTestUrl mid-check.
-func CheckSpeed(httpClient *http.Client, bucket *ratelimit.Bucket, bytesCounter *uint64, speedTestURL string) (int, int64, error) {
-	// 注意：速度限制在网络层（statsConn）实现，大小限制在应用层基于网络字节计数器实现
-	// - 速度限制：通过 bucket 在 statsConn 中实现（网络层）
-	// - 大小限制：通过 networkLimitedReader 基于网络字节计数器实现（应用层，但限制网络流量）
-
-	// 创建一个新的测速专用客户端，基于原有客户端的传输层
-	speedClient := &http.Client{
-		// 设置更长的超时时间用于测速
-		Timeout: time.Duration(config.GlobalConfig.DownloadTimeout) * time.Second,
-		// 保持原有的传输层配置
-		Transport: httpClient.Transport,
+// CheckSpeed 执行下载测速
+func CheckSpeed(httpClient *http.Client, bucket *ratelimit.Bucket, getNetBytes func() uint64) (int, int64, error) {
+	// 确定测速 URL，根据配置使用随机下载测速链接
+	url := config.GlobalConfig.SpeedTestURL
+	if strings.Contains(url, "random") && len(testURLs) > 0 {
+		url = testURLs[rand.IntN(len(testURLs))]
 	}
+	slog.Debug("随机选择的测速URL", "url", url)
 
-	req, err := http.NewRequest("GET", speedTestURL, nil)
+	speedClient := *httpClient
+	speedClient.Timeout = 0
+
+	// 下载需要根据配置文件设置较长的超时
+	timeout := time.Duration(config.GlobalConfig.DownloadTimeout) * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return 0, 0, err
 	}
-	req.Header.Set("User-Agent", convert.RandUserAgent())
 
-	// 记录测速前的网络传输字节数
-	var startBytes uint64
-	if bytesCounter != nil {
-		startBytes = *bytesCounter
+	// 设置请求头
+	req.Header.Set("User-Agent", convert.RandUserAgent())
+	req.Header.Set("Cache-Control", "no-cache")
+
+	// 准备读取器,将起始时间和起始流量的记录移到 Do(req) 之前
+	var startNetBytes uint64
+	if getNetBytes != nil {
+		startNetBytes = getNetBytes()
 	}
 	startTime := time.Now()
 
+	// 发起请求 (此时开始发生 TCP/TLS 握手)
 	resp, err := speedClient.Do(req)
 	if err != nil {
-		slog.Debug(fmt.Sprintf("测速请求失败: %v", err))
 		return 0, 0, err
 	}
 	defer resp.Body.Close()
 
-	// 计算网络层的大小限制
-	var limitSize uint64
-	if config.GlobalConfig.DownloadMB > 0 {
-		limitSize = uint64(config.GlobalConfig.DownloadMB) * 1024 * 1024
-	} else {
-		limitSize = 0 // 不限制
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return 0, 0, fmt.Errorf("http status %d", resp.StatusCode)
 	}
 
-	// 使用 networkLimitedReader 包装响应体，基于网络字节计数器限制大小
+	var limit uint64
+	if mb := config.GlobalConfig.DownloadMB; mb > 0 {
+		limit = uint64(mb) * 1024 * 1024
+	}
+
 	limitedReader := &networkLimitedReader{
-		reader:       resp.Body,
-		bytesCounter: bytesCounter,
-		startBytes:   startBytes,
-		limit:        limitSize,
+		reader:      resp.Body,
+		getNetBytes: getNetBytes,
+		startBytes:  startNetBytes,
+		limit:       limit,
 	}
 
-	// 读取所有数据
-	totalBytes, err := io.Copy(io.Discard, limitedReader)
-	// io.EOF 是正常的（达到限制），其他错误才需要关注
-	if err != nil && err != io.EOF && totalBytes == 0 {
-		slog.Debug(fmt.Sprintf("totalBytes: %d, 读取数据时发生错误: %v", totalBytes, err))
+	// 执行下载读取 (io.Copy)
+	// copiedBytes，以便在 getNetBytes 失败时兜底
+	copiedBytes, err := io.Copy(io.Discard, limitedReader)
+
+	// 如果错误是“超时”或“EOF”，这是测速的正常结束状态，不应视为 Failure
+	// 使用 errors.Is 处理嵌套错误。因为网络超时抛出的错误通常是被包装过的
+	if err != nil && err != io.EOF && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
 		return 0, 0, err
 	}
 
-	// 计算下载时间（毫秒）
-	duration := time.Since(startTime).Milliseconds()
-	if duration == 0 {
-		duration = 1 // 避免除以零
+	// 计算耗时
+	duration := time.Since(startTime).Seconds()
+	if duration < 0.1 {
+		duration = 0.1 // 防止除零
 	}
 
-	// 计算实际网络传输的字节数（压缩数据）
-	var actualBytes int64
-	if bytesCounter != nil {
-		actualBytes = int64(*bytesCounter - startBytes)
-	} else {
-		// 如果没有字节计数器，无法获取准确数据
-		actualBytes = 0
+	// 计算总流量
+	var totalBytes int64
+	useNetBytes := false
+
+	// 尝试使用网络层流量（包含 Header、TLS握手、TCP重传等真实流量）
+	if getNetBytes != nil {
+		curr := getNetBytes()
+		if curr >= startNetBytes {
+			totalBytes = int64(curr - startNetBytes)
+			useNetBytes = true
+		}
 	}
 
-	// 计算速度（KB/s），使用实际网络传输的字节数
-	speed := int(float64(actualBytes) / 1024 * 1000 / float64(duration))
+	// 兜底逻辑：如果无法获取网络层流量，或计算异常，回退到应用层流量
+	if !useNetBytes || totalBytes <= 0 {
+		totalBytes = copiedBytes
+	}
 
-	return speed, actualBytes, nil
+	if totalBytes <= 0 {
+		// 即使超时也应该有一点数据，如果完全没数据则报错
+		return 0, 0, fmt.Errorf("no bytes transfer")
+	}
+
+	// 计算速度 (KB/s)
+	speed := int(float64(totalBytes) / 1024.0 / duration)
+
+	slog.Debug("测速完成",
+		"speed_KB_s", speed,
+		"duration_s", strconv.FormatFloat(duration, 'f', 2, 64),
+		"bytes", totalBytes,
+		"use_net_bytes", useNetBytes,
+	)
+
+	return speed, totalBytes, nil
 }

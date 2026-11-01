@@ -1,16 +1,19 @@
+// Package method 保存检测结果的方法
 package method
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"net/url"
 	"time"
 
-	"log/slog"
+	"github.com/goccy/go-json"
 
-	"github.com/beck-8/subs-check/config"
+	"github.com/sinspired/subs-check-pro/v3/config"
+	"github.com/sinspired/subs-check-pro/v3/utils"
 )
 
 const (
@@ -33,8 +36,31 @@ type R2Uploader struct {
 
 // NewR2Uploader 创建新的R2上传器
 func NewR2Uploader() *R2Uploader {
+	transport := &http.Transport{}
+
+	// 判断系统代理是否可用
+	useProxy := utils.GetSysProxy()
+
+	if useProxy {
+		proxyStr := config.GlobalConfig.SystemProxy
+		proxyURL, perr := url.Parse(proxyStr)
+		if perr != nil {
+			slog.Error("解析配置中的代理 URL 失败，将不使用代理", "proxy_url", proxyStr, "error", perr)
+			transport.Proxy = nil
+		} else {
+			transport.Proxy = http.ProxyURL(proxyURL)
+		}
+	} else {
+		transport.Proxy = nil
+	}
+
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   30 * time.Second,
+	}
+
 	return &R2Uploader{
-		client:    &http.Client{Timeout: 30 * time.Second},
+		client:    client,
 		workerURL: config.GlobalConfig.WorkerURL,
 		token:     config.GlobalConfig.WorkerToken,
 	}
@@ -46,7 +72,7 @@ func UploadToR2Storage(yamlData []byte, filename string) error {
 	return uploader.Upload(yamlData, filename)
 }
 
-// valiR2Config 验证R2配置
+// ValiR2Config 验证R2配置
 func ValiR2Config() error {
 	if config.GlobalConfig.WorkerURL == "" {
 		return fmt.Errorf("worker url未配置")
@@ -97,7 +123,7 @@ func (r *R2Uploader) validateInput(yamlData []byte, filename string) error {
 func (r *R2Uploader) uploadWithRetry(jsonData []byte, filename string) error {
 	var lastErr error
 
-	for attempt := 0; attempt < maxRetries; attempt++ {
+	for attempt := range maxRetries {
 		if err := r.doUpload(jsonData); err != nil {
 			lastErr = err
 			slog.Error(fmt.Sprintf("R2上传失败(尝试 %d/%d) %v", attempt+1, maxRetries, err))
@@ -132,7 +158,8 @@ func (r *R2Uploader) doUpload(jsonData []byte) error {
 
 // createRequest 创建HTTP请求
 func (r *R2Uploader) createRequest(jsonData []byte) (*http.Request, error) {
-	url := fmt.Sprintf("%s/storage?token=%s", r.workerURL, r.token)
+	url := utils.JoinURL(r.workerURL, "storage") + "?token=" + r.token
+
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("创建请求失败: %w", err)
