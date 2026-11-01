@@ -1,12 +1,10 @@
 # 适配 Glibc 动态链接与 CGO
 FROM golang:1.24-bookworm AS builder
 
+# 安装编译工具链与官方自适应多架构 UPX
 RUN apt-get update -o Acquire::Check-Valid-Until=false \
-    && apt-get install -y wget xz-utils gcc g++ musl-dev \
-    && wget https://github.com/upx/upx/releases/download/v4.2.2/upx-4.2.2-amd64_linux.tar.xz \
-    && tar -xf upx-4.2.2-amd64_linux.tar.xz \
-    && mv upx-4.2.2-amd64_linux/upx /usr/local/bin/upx \
-    && rm -rf upx-4.2.2-amd64_linux*
+    && apt-get install -y gcc g++ musl-dev upx-ucl \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
 ENV GOPROXY=https://goproxy.cn,direct
@@ -35,7 +33,7 @@ ENV TZ=Asia/Shanghai
 ENV RUNNING_IN_DOCKER=true
 
 LABEL org.opencontainers.image.title="SubMatrix" \
-    org.opencontainers.image.description="高性能订阅拓扑矩阵与检测聚合平台"
+    org.opencontainers.image.description="高性能订阅拓扑矩阵与检测筛选工具"
 
 COPY --from=builder /app/submatrix /app/submatrix
 
