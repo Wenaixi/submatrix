@@ -33,6 +33,8 @@ type ResultsSnapshot struct {
 type NodeRecord struct {
 	Name     string           `json:"name"`     // display name, same as all.yaml
 	BaseName string           `json:"baseName"` // name without speed/media tags
+	OriginalName string           `json:"originalName,omitempty"`
+	IPType       string           `json:"ipType,omitempty"`
 	Type     string           `json:"type"`
 	Server   string           `json:"server"`
 	Port     string           `json:"port"`
@@ -89,6 +91,8 @@ func newNodeRecord(r check.Result, parts check.NameParts) NodeRecord {
 	rec := NodeRecord{
 		Name:     parts.String(),
 		BaseName: parts.Base,
+		OriginalName: parts.OriginalName,
+		IPType:       parts.IPType,
 		Type:     typ,
 		Server:   proxyString(p, "server"),
 		Port:     proxyString(p, "port"),

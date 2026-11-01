@@ -783,11 +783,23 @@
                 switch (c.key) {
                     case 'name': {
                         const extras = [];
+                        if (n.ipType === '家宽') {
+                            extras.push('<span class="badge" style="background:#e8f5e9;color:#2e7d32;border:1px solid #c8e6c9;font-size:0.72rem;padding:2px 6px;">🏠 家宽</span>');
+                        } else if (n.ipType === '机房') {
+                            extras.push('<span class="badge" style="background:#e3f2fd;color:#1565c0;border:1px solid #bbdefb;font-size:0.72rem;padding:2px 6px;">🏢 机房</span>');
+                        } else if (n.ipType === '移动') {
+                            extras.push('<span class="badge" style="background:#fff3e0;color:#e65100;border:1px solid #ffe0b2;font-size:0.72rem;padding:2px 6px;">📶 移动</span>');
+                        }
                         if (!shown.type) extras.push('<span class="type-badge ' + typeClass(n.type) + '">' + esc(n.type) + '</span>');
                         if (!shown.media) n._tags.forEach(function (t) { extras.push('<span class="tag">' + esc(t) + '</span>'); });
                         if (n.subTag) extras.push('<span class="tag tag-sub">' + esc(n.subTag) + '</span>');
+                        
+                        let nameLabel = esc(n.baseName || n.name);
+                        if (n.originalName) {
+                            nameLabel += ' <span style="opacity:0.65;font-size:0.75rem;color:var(--text-2);" title="节点原始名称">(原名: ' + esc(n.originalName) + ')</span>';
+                        }
                         html += '<div class="cell"><div class="node-name ellipsis" title="' + esc(n.name) + '">' +
-                            esc(n.baseName || n.name) + '</div>' +
+                            nameLabel + '</div>' +
                             (extras.length ? '<div class="node-sub">' + extras.join('') + '</div>' : '') + '</div>';
                         break;
                     }
