@@ -47,3 +47,6 @@ monitor.ps1
 .gitignore
 monitor.csv
 monitor.sh
+
+screenshots/
+config/cache/
