@@ -1,9 +1,9 @@
 # 适配 Glibc 动态链接与 CGO
 FROM golang:1.24-bookworm AS builder
 
-# 安装编译工具链与官方自适应多架构 UPX
+# 安装 CGO 编译工具链
 RUN apt-get update -o Acquire::Check-Valid-Until=false \
-    && apt-get install -y gcc g++ musl-dev upx-ucl \
+    && apt-get install -y gcc g++ musl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -17,9 +17,6 @@ RUN CGO_CFLAGS="-Os -g0" CGO_ENABLED=1 \
     go build -trimpath \
     -ldflags="-s -w" \
     -o /app/submatrix .
-
-# 执行 UPX 压缩
-RUN upx -5 /app/submatrix || true
 
 # 基础镜像使用带有 glibc 的 busybox
 FROM busybox:glibc
