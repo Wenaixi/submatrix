@@ -1,8 +1,6 @@
 module github.com/sinspired/subs-check-pro/v3
 
-go 1.24.0
-
-toolchain go1.26.4
+go 1.27.0
 
 replace gopkg.in/ini.v1 => github.com/go-ini/ini v1.67.3
 
