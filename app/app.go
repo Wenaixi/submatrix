@@ -266,7 +266,7 @@ func (app *App) checkProxies() error {
 			slog.Error("组执行失败", "group", grp.Name, "err", err)
 			continue
 		}
-		save.SaveGroupConfig(grp.Name, results)
+		save.SaveGroupConfig(grp, results)
 		allAggregatedResults = append(allAggregatedResults, results...)
 	}
 
@@ -285,7 +285,7 @@ func (app *App) checkProxies() error {
 			slog.Error("聚合组装配失败", "group", grp.Name, "err", err)
 			continue
 		}
-		save.SaveGroupConfig(grp.Name, results)
+		save.SaveGroupConfig(grp, results)
 		allAggregatedResults = append(allAggregatedResults, results...)
 	}
 

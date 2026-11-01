@@ -79,3 +79,21 @@ func TestRenderOfflineNode(t *testing.T) {
 		t.Errorf("离线节点应具有 [离线] 前缀，实际为: %s", got)
 	}
 }
+
+func TestExtractRootOriginalName(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"香港 01", "香港 01"},
+		{"❓Other_1|免费A (原名: 香港 01)", "香港 01"},
+		{"❓Other_100|免费A (原名: ❓Other_1|免费A (原名: 真实原始名))", "真实原始名"},
+	}
+
+	for _, tc := range cases {
+		got := extractRootOriginalName(tc.input)
+		if got != tc.want {
+			t.Errorf("extractRootOriginalName(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}

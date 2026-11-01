@@ -62,12 +62,15 @@ func startSubStore() error {
 	}
 	defer killNode()
 
-	// 如果subs-check内存问题退出，会导致node二进制损坏，启动的node变成僵尸，所以删一遍
-	os.Remove(nodePath)
-	os.Remove(jsPath)
-	os.Remove(overYamlPath)
-	if err := decodeZstd(nodePath, jsPath, overYamlPath); err != nil {
-		return err
+	// 如果文件不存在才解压，避免运行时因 Windows 独占锁导致崩溃重启
+	if _, err := os.Stat(nodePath); os.IsNotExist(err) {
+		if err := decodeZstd(nodePath, jsPath, overYamlPath); err != nil {
+			return err
+		}
+	} else if _, err := os.Stat(jsPath); os.IsNotExist(err) {
+		if err := decodeZstd(nodePath, jsPath, overYamlPath); err != nil {
+			return err
+		}
 	}
 
 	// 配置日志轮转
