@@ -14,7 +14,7 @@ func TestRenderNameIPType(t *testing.T) {
 		name        string
 		result      Result
 		expectedTag string
-		mustNotHave string
+		mustHave    string
 	}{
 		{
 			name: "家宽节点追加家宽标签",
@@ -23,16 +23,16 @@ func TestRenderNameIPType(t *testing.T) {
 				IPType: "家宽",
 			},
 			expectedTag: "HK-Node-01|家宽",
-			mustNotHave: "机房",
+			mustHave:    "家宽",
 		},
 		{
-			name: "机房节点保持清爽不追加机房标签",
+			name: "机房节点追加机房标签",
 			result: Result{
 				Proxy:  map[string]any{"name": "US-Node-02"},
 				IPType: "机房",
 			},
-			expectedTag: "US-Node-02",
-			mustNotHave: "机房",
+			expectedTag: "US-Node-02|机房",
+			mustHave:    "机房",
 		},
 		{
 			name: "未知类型不追加任何标签",
@@ -41,7 +41,7 @@ func TestRenderNameIPType(t *testing.T) {
 				IPType: "",
 			},
 			expectedTag: "JP-Node-03",
-			mustNotHave: "家宽",
+			mustHave:    "",
 		},
 	}
 
@@ -51,8 +51,8 @@ func TestRenderNameIPType(t *testing.T) {
 			if rendered != tt.expectedTag {
 				t.Errorf("期望渲染名字 %q, 得到 %q", tt.expectedTag, rendered)
 			}
-			if tt.mustNotHave != "" && strings.Contains(rendered, tt.mustNotHave) {
-				t.Errorf("渲染名字 %q 不应包含 %q", rendered, tt.mustNotHave)
+			if tt.mustHave != "" && !strings.Contains(rendered, tt.mustHave) {
+				t.Errorf("渲染名字 %q 应包含 %q", rendered, tt.mustHave)
 			}
 		})
 	}
