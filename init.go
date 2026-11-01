@@ -58,14 +58,12 @@ func init() {
 	if os.Getenv("SUBS_CHECK_RESTARTED") == "1" {
 		fmt.Println("\033[32m重启成功\033[0m")
 	}
-	fmt.Println("==================== WARNING ====================")
-	fmt.Println("⚠️  重要提示：")
-	fmt.Println("1. 本项目完全开源免费，请勿相信任何收费版本")
-	fmt.Println("2. 本项目仅供学习交流，请勿用于非法用途")
-	fmt.Println("3. 项目地址：https://github.com/sinspired/subs-check-pro")
-	fmt.Println("4. 镜像地址：ghcr.io/sinspired/subs-check-pro:latest")
-	fmt.Println("5. 客户端：https://github.com/sinspired/subs-free")
-	fmt.Println("==================================================")
+	fmt.Println("==================== SubMatrix ====================")
+	fmt.Println("⚡ SubMatrix 高性能订阅拓扑矩阵与节点筛选工具")
+	fmt.Println("1. 项目地址：https://github.com/Wenaixi/submatrix")
+	fmt.Println("2. 官方镜像：docker.io/wenxiloveyou/submatrix:latest")
+	fmt.Println("3. 统一端口：:8199 (支持WebUI管理与Sub-Store统一反代)")
+	fmt.Println("===================================================")
 
 	if strings.ToLower(os.Getenv("SUB_CHECK_PPROF")) != "" {
 		// 在调试模式下启动 pprof 服务器

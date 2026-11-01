@@ -23,16 +23,17 @@
     content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#121316" media="(prefers-color-scheme: dark)" />
-  <title>Subs Check · 管理面板</title>
+  <title>SubMatrix · 订阅拓扑矩阵与检测控制台</title>
 
   <link rel="icon" type="image/png" href="/static/icon/favicon-96x96.png" sizes="96x96" />
   <link rel="icon" type="image/svg+xml" href="/static/icon/favicon.svg" />
   <link rel="shortcut icon" href="/static/icon/favicon.ico" />
   <link rel="apple-touch-icon" sizes="180x180" href="/static/icon/apple-touch-icon.png" />
-  <meta name="apple-mobile-web-app-title" content="Subs-Check-Pro" />
+  <meta name="apple-mobile-web-app-title" content="SubMatrix" />
   <link rel="manifest" href="/static/icon/site.webmanifest" />
   <link rel="stylesheet" href="/static/css/admin.css?v20260324">
   <link rel="stylesheet" href="/static/css/admin-cfg-form.css?v20260324">
+  <link rel="stylesheet" href="/static/css/submatrix-sharp.css">
 </head>
 
 <body>
@@ -40,7 +41,7 @@
   <header>
     <div class="hdr-left">
       <a href="https://github.com/Wenaixi/submatrix" target="_blank" rel="noopener noreferrer"
-        title="访问 GitHub 项目" aria-label="跳转到 Subs Check Pro GitHub 仓库">
+        title="访问 GitHub 项目" aria-label="跳转到 SubMatrix GitHub 仓库">
         <div class="logo">
           <img src="/static/icon/scp-app.svg" alt="logo" />
         </div>
@@ -174,10 +175,10 @@
             <!-- 项目介绍 -->
             <div class="project-desc">
               <p>
-                <a href="https://github.com/sinspired/subs-free" target="_blank" rel="noopener">跨平台 GUI</a>丨<a
-                  href="https://sinspired.github.io/subs-check-pro/" target="_blank" rel="noopener">文档站</a>丨<a
-                  href="https://github.com/sinspired/subs-check-pro/wiki" target="_blank" rel="noopener">Wiki</a>丨<a
-                  href="https://github.com/sinspired/subs-check-pro/blob/main/config/config.yaml.example"
+                <a href="https://github.com/Wenaixi/submatrix" target="_blank" rel="noopener">跨平台 GUI</a>丨<a
+                  href="https://github.com/Wenaixi/submatrix#readme" target="_blank" rel="noopener">文档站</a>丨<a
+                  href="https://github.com/Wenaixi/submatrix/wiki" target="_blank" rel="noopener">Wiki</a>丨<a
+                  href="https://github.com/Wenaixi/submatrix/blob/main/config/config.yaml.example"
                   target="_blank" rel="noopener">配置模板</a>
               </p>
             </div>
@@ -188,12 +189,12 @@
               <a id="dockerMenuBtn" href="#" title="Docker 镜像" aria-label="Docker 镜像">
                 <img src="/static/icon/docker.svg" alt="Docker" class="project-icon" />
               </a>
-              <a id="telegramMenuBtn" href="https://t.me/subs_check_pro" title="Telegram 群" aria-label="Telegram 群">
+              <a id="telegramMenuBtn" href="https://github.com/Wenaixi/submatrix" title="Telegram 群" aria-label="Telegram 群">
                 <img src="/static/icon/telegram.svg" alt="Telegram" class="project-icon" />
               </a>
             </div>
             <div class="project-copy">
-              © 2025 <a href="https://github.com/sinspired" target="_blank" rel="noopener">sinspired</a> ·
+              © 2026 <a href="https://github.com/Wenaixi/submatrix" target="_blank" rel="noopener">SubMatrix</a> ·
               <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener">GPL-3.0 License</a>
             </div>
           </div>
@@ -206,13 +207,13 @@
           <!-- 品牌块：大屏时替代顶部 header -->
           <div class="sidebar-brand" id="sidebarBrand">
             <div class="sb-brand-top">
-              <a href="https://github.com/sinspired/subs-free" target="_blank" rel="noopener noreferrer"
+              <a href="https://github.com/Wenaixi/submatrix" target="_blank" rel="noopener noreferrer"
                 title="访问 GitHub 项目" class="sb-logo-link">
                 <img src="/static/icon/favicon.svg" alt="logo" class="sb-logo" />
               </a>
               <div class="sb-info">
-                <div class="sb-name">Subs Check<span class="sb-pro pro-plus-golden">+</span></div>
-                <div class="sb-sub">订阅检测 · 配置管理</div>
+                <div class="sb-name">SubMatrix<span class="sb-pro pro-plus-golden"> Matrix</span></div>
+                <div class="sb-sub">订阅拓扑矩阵 · 智能测活画像</div>
               </div>
             </div>
 
@@ -246,6 +247,16 @@
                     d="M95.4 73c4.4 13.3-8.4 26.5-21.6 22.5-3.4-1-8.2-4.9-15.2-11.8L48.4 73.4l2.8-2.8 2.8-2.8 10 9.9c8.2 8.2 10.7 9.9 14.2 9.9 9.2 0 12.5-10.6 5.4-17.4l-3.8-3.8 2.8-3 2.8-3 4.2 4.1c2.3 2.2 4.9 6 5.6 8.4z" />
                 </svg>
                 <span>订阅管理</span>
+              </div>
+                            <div class="list-item" id="groupMatrixNavBtn" title="可视化管理订阅拓扑矩阵与各组开关" style="cursor:pointer;">
+                <svg class="sidebar-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" stroke-width="2" stroke-linecap="square" stroke-linejoin="miter">
+                  <rect x="3" y="3" width="7" height="7"></rect>
+                  <rect x="14" y="3" width="7" height="7"></rect>
+                  <rect x="14" y="14" width="7" height="7"></rect>
+                  <rect x="3" y="14" width="7" height="7"></rect>
+                </svg>
+                <span>分组矩阵</span>
               </div>
               <div class="list-item" id="file-manager" title="查看订阅文件、分享入口及公共规则文件" style="cursor:pointer;">
                 <svg class="sidebar-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
@@ -720,6 +731,17 @@
             <span>订阅</span>
           </button>
 
+                    <button class="cfg-tab" data-tab="groups" role="tab" aria-selected="false">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="square" stroke-linejoin="miter">
+              <rect x="3" y="3" width="7" height="7" />
+              <rect x="14" y="3" width="7" height="7" />
+              <rect x="14" y="14" width="7" height="7" />
+              <rect x="3" y="14" width="7" height="7" />
+            </svg>
+            <span>分组矩阵</span>
+          </button>
+
           <button class="cfg-tab" data-tab="detection" role="tab" aria-selected="false">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
               stroke-linecap="round" stroke-linejoin="round">
@@ -779,6 +801,7 @@
             </div>
           </div>
           <div class="cfg-panel" id="panel-subscriptions" role="tabpanel"></div>
+          <div class="cfg-panel" id="panel-groups" role="tabpanel"></div>
           <div class="cfg-panel" id="panel-detection" role="tabpanel"></div>
           <div class="cfg-panel" id="panel-storage" role="tabpanel"></div>
           <div class="cfg-panel" id="panel-notify" role="tabpanel"></div>
@@ -802,12 +825,12 @@
       <a id="dockerUrlBtn" href="#" title="Docker 镜像" aria-label="Docker 镜像">
         <img src="/static/icon/docker.svg" alt="Docker" class="footer-icon" />
       </a>
-      <a id="telegramUrlBtn" href="https://t.me/subs_check_pro" title="Telegram 群" aria-label="Telegram 群">
+      <a id="telegramUrlBtn" href="https://github.com/Wenaixi/submatrix" title="Telegram 群" aria-label="Telegram 群">
         <img src="/static/icon/telegram.svg" alt="Telegram" class="footer-icon" />
       </a>
     </div>
     <div class="footer-copy">
-      © 2025 <a href="https://github.com/sinspired" target="_blank" rel="noopener">sinspired</a> ·
+      © 2026 <a href="https://github.com/Wenaixi/submatrix" target="_blank" rel="noopener">SubMatrix</a> ·
       <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener">GPL-3.0 License</a>
     </div>
   </div>
@@ -818,6 +841,7 @@
   <script src="/static/js/icons.js?v20260324"></script>
   <script type="module" src="/static/js/admin.js?v202606082401"></script>
   <script src="/static/js/reg-sw.js??v202606082401"></script>
+  <script type="module" src="/static/js/group-matrix.js"></script>
   <!-- 侧边栏主题切换 & 登录框主题切换 代理到主按钮，并同步小屏 header 版本角标 -->
 </body>
 

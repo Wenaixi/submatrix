@@ -1,0 +1,329 @@
+/* ═════════════════════════════════════════════════════════════════════
+   SubMatrix Industrial Brutalist UI - 去圆角顶级工业级设计规范
+   ═════════════════════════════════════════════════════════════════════ */
+
+/* 1. 全局去圆角化：利落、硬核、极客切边 */
+*, *::before, *::after {
+  border-radius: 0 !important;
+}
+
+/* 2. 微质感徽章允许 1px 微修角 */
+.badge, .tag-badge {
+  border-radius: 1px !important;
+}
+
+/* 3. 边框硬朗精准切线与质感增强 */
+.card, .sidebar, .progress-card, .logs-card, .cfg-drawer, .cfg-panel,
+.btn, .icon-btn, input, select, textarea, progress, .slide-menu,
+.group-matrix-card, .toggle-btn, .history-card {
+  border-radius: 0 !important;
+  border-width: 1px !important;
+  box-shadow: none !important;
+}
+
+/* 4. 等宽数字与技术排印 */
+.stat-val, .progress-info span, #progressText, .link-text, code, pre,
+.matrix-input, .matrix-textarea {
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
+}
+
+/* 5. 分组矩阵 (Groups Matrix) 专属视觉面板 */
+.matrix-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: rgba(24, 24, 27, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  margin-bottom: 14px;
+}
+
+.matrix-header-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.matrix-header-subtitle {
+  font-size: 0.75rem;
+  color: #a1a1aa;
+  margin-top: 2px;
+}
+
+.matrix-actions-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-matrix-sharp {
+  background: #18181b;
+  border: 1px solid rgba(0, 255, 204, 0.4);
+  color: #00ffcc;
+  padding: 5px 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.btn-matrix-sharp:hover {
+  background: #00ffcc;
+  color: #09090b;
+  border-color: #00ffcc;
+}
+
+.btn-matrix-save {
+  background: #00ffcc;
+  color: #09090b;
+  border: 1px solid #00ffcc;
+  padding: 5px 14px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-matrix-save:hover {
+  background: #10b981;
+  border-color: #10b981;
+  color: #fff;
+}
+
+/* 6. 分组卡片 (Group Card) */
+.group-matrix-card {
+  background: rgba(18, 19, 22, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 16px;
+  margin-bottom: 14px;
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+.group-matrix-card:hover {
+  border-color: rgba(0, 255, 204, 0.45);
+}
+
+.group-matrix-card.disabled-group {
+  opacity: 0.58;
+  border-style: dashed;
+  background: rgba(14, 14, 16, 0.6);
+}
+
+/* 卡片顶部标题栏 */
+.group-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 14px;
+}
+
+.group-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.group-name-tag {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #00ffcc;
+  letter-spacing: 0.5px;
+}
+
+.group-badge {
+  font-size: 0.7rem;
+  padding: 2px 7px;
+  background: rgba(0, 255, 204, 0.12);
+  border: 1px solid rgba(0, 255, 204, 0.35);
+  color: #00ffcc;
+  text-transform: uppercase;
+}
+
+/* 工业级矩形直角滑动开关 */
+.sharp-toggle-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.sharp-toggle-label {
+  font-size: 0.75rem;
+  color: #a1a1aa;
+}
+
+.matrix-switch {
+  position: relative;
+  width: 38px;
+  height: 20px;
+  display: inline-block;
+  cursor: pointer;
+}
+
+.matrix-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.matrix-slider {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: #27272a;
+  border: 1px solid #3f3f46;
+  transition: 0.15s ease;
+}
+
+.matrix-slider:before {
+  position: absolute;
+  content: "";
+  height: 12px;
+  width: 12px;
+  left: 3px;
+  bottom: 3px;
+  background-color: #71717a;
+  transition: 0.15s ease;
+}
+
+.matrix-switch input:checked + .matrix-slider {
+  background-color: rgba(0, 255, 204, 0.15);
+  border-color: #00ffcc;
+}
+
+.matrix-switch input:checked + .matrix-slider:before {
+  transform: translateX(18px);
+  background-color: #00ffcc;
+  box-shadow: 0 0 6px rgba(0, 255, 204, 0.7);
+}
+
+/* 参数开关网格 */
+.group-switches-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 12px;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  margin-bottom: 12px;
+}
+
+.switch-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.switch-title {
+  font-size: 0.75rem;
+  color: #d4d4d8;
+}
+
+/* 参数输入行 */
+.group-inputs-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.matrix-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.matrix-label {
+  font-size: 0.72rem;
+  color: #71717a;
+  text-transform: uppercase;
+}
+
+.matrix-input {
+  background: #18181b;
+  border: 1px solid #27272a;
+  color: #f4f4f5;
+  padding: 5px 8px;
+  font-size: 0.8rem;
+  outline: none;
+}
+
+.matrix-input:focus {
+  border-color: #00ffcc;
+}
+
+/* 订阅源文本域 */
+.matrix-textarea {
+  width: 100%;
+  min-height: 80px;
+  background: #18181b;
+  border: 1px solid #27272a;
+  color: #a1a1aa;
+  padding: 8px;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  resize: vertical;
+  outline: none;
+}
+
+.matrix-textarea:focus {
+  border-color: #00ffcc;
+  color: #fff;
+}
+
+/* 直链复制与操作栏 */
+.group-footer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.direct-copy-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.btn-direct-link {
+  background: #121316;
+  border: 1px solid #27272a;
+  color: #a1a1aa;
+  font-size: 0.72rem;
+  padding: 4px 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-direct-link:hover {
+  border-color: #00ffcc;
+  color: #00ffcc;
+}
+
+.btn-group-delete {
+  background: transparent;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #ef4444;
+  font-size: 0.72rem;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.btn-group-delete:hover {
+  background: #ef4444;
+  color: #fff;
+}
