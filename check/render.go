@@ -8,6 +8,26 @@ import (
 	proxyutils "github.com/beck-8/subs-check/proxy"
 )
 
+// extractRootOriginalName 幂等提取最内层真正的原始节点名，防止聚合重入套娃
+func extractRootOriginalName(raw string) string {
+	const prefix = " (原名: "
+	raw = strings.TrimSpace(raw)
+	for {
+		start := strings.Index(raw, prefix)
+		if start == -1 {
+			break
+		}
+		end := strings.LastIndex(raw, ")")
+		if end > start+len(prefix) {
+			raw = strings.TrimSpace(raw[start+len(prefix) : end])
+		} else {
+			break
+		}
+	}
+	return raw
+}
+
+
 // RenderName 根据 Result 的结构化字段构造展示名。
 func RenderName(r Result, includeSpeed bool) string {
 	return RenderNameParts(r, includeSpeed).String()
@@ -73,6 +93,13 @@ func RenderOfflineNode(origName, subTag string) string {
 
 // RenderNameParts is the structured form of RenderName.
 func RenderNameParts(r Result, includeSpeed bool) NameParts {
+	// 防重入：若已经渲染过名字，直接返回既有名字，杜绝聚合组重复套娃
+	if r.Proxy != nil {
+		if rendered, _ := r.Proxy["submatrix_rendered"].(bool); rendered {
+			name, _ := r.Proxy["name"].(string)
+			return NameParts{Base: name}
+		}
+	}
 	var p NameParts
 	p.IPType = r.IPType
 
@@ -95,7 +122,7 @@ func RenderNameParts(r Result, includeSpeed bool) NameParts {
 		}
 
 		if rawName != "" && config.GlobalConfig.RenameNode && config.GlobalConfig.AppendOriginalName {
-			p.OriginalName = rawName
+			p.OriginalName = extractRootOriginalName(rawName)
 		}
 	}
 

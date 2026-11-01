@@ -59,6 +59,7 @@ func SaveConfig(results []check.Result) {
 		}
 		parts := check.RenderNameParts(results[i], true)
 		results[i].Proxy["name"] = parts.String()
+		results[i].Proxy["submatrix_rendered"] = true
 		nodes = append(nodes, newNodeRecord(results[i], parts))
 	}
 	saveResultsSnapshot(nodes)
@@ -181,8 +182,8 @@ func newRemoteSaver() (SaveFunc, error) {
 	}
 }
 // SaveGroupConfig 保存特定组的独立检测结果到 groups/<groupName>/ 目录
-func SaveGroupConfig(groupName string, results []check.Result) {
-	if len(results) == 0 || groupName == "" {
+func SaveGroupConfig(grp config.ResolvedGroupConfig, results []check.Result) {
+	if len(results) == 0 || grp.Name == "" {
 		return
 	}
 
@@ -192,10 +193,9 @@ func SaveGroupConfig(groupName string, results []check.Result) {
 		return
 	}
 
-	groupDir := filepath.Join(saver.OutputPath, "groups", groupName)
+	groupDir := filepath.Join(saver.OutputPath, "groups", grp.Name)
 	os.MkdirAll(groupDir, 0755)
 
-	// 克隆 results 以便打上展示名
 	cloned := make([]check.Result, 0, len(results))
 	for _, r := range results {
 		if r.Proxy == nil {
@@ -206,11 +206,17 @@ func SaveGroupConfig(groupName string, results []check.Result) {
 			pClone[k] = v
 		}
 
-		// 若未离线，渲染最终展示名
-		if isOffline, _ := pClone["offline"].(bool); !isOffline {
-			parts := check.RenderNameParts(r, true)
-			pClone["name"] = parts.String()
+		// 只有开启了重命名且未被渲染过的节点才执行改名
+		if grp.RenameNode {
+			if isOffline, _ := pClone["offline"].(bool); !isOffline {
+				if alreadyRendered, _ := pClone["submatrix_rendered"].(bool); !alreadyRendered {
+					parts := check.RenderNameParts(r, true)
+					pClone["name"] = parts.String()
+					pClone["submatrix_rendered"] = true
+				}
+			}
 		}
+
 		cloned = append(cloned, check.Result{
 			Proxy:   pClone,
 			Country: r.Country,
@@ -219,7 +225,6 @@ func SaveGroupConfig(groupName string, results []check.Result) {
 		})
 	}
 
-	// 序列化为 proxies 格式
 	proxiesList := make([]map[string]any, 0, len(cloned))
 	for _, cr := range cloned {
 		proxiesList = append(proxiesList, cr.Proxy)
