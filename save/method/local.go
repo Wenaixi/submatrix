@@ -6,14 +6,14 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/beck-8/subs-check/config"
-	"github.com/beck-8/subs-check/utils"
+	"github.com/sinspired/subs-check-pro/v3/config"
+	"github.com/sinspired/subs-check-pro/v3/utils"
 )
 
 const (
 	outputDirName = "output"
-	fileMode      = 0644
-	dirMode       = 0755
+	fileMode      = 0o644
+	dirMode       = 0o755
 )
 
 // LocalSaver 处理本地文件保存的结构体
@@ -24,15 +24,25 @@ type LocalSaver struct {
 
 // NewLocalSaver 创建新的本地保存器
 func NewLocalSaver() (*LocalSaver, error) {
-	basePath := utils.GetExecutablePath()
+	basePath := utils.GetExternalStorageDir()
 	if basePath == "" {
 		return nil, fmt.Errorf("获取可执行文件路径失败")
 	}
 
 	var outputPath string
-	if config.GlobalConfig.OutputDir != "" {
+
+	// 获取配置文件的默认保存位置，兼容移动设备
+	defaultConfigDir := filepath.Join(utils.GetPrivateStorageDir(), "config")
+
+	switch {
+	case config.GlobalConfig.OutputDir != "":
+		// 用户在配置文件中显式设置了输出目录，直接使用
 		outputPath = config.GlobalConfig.OutputDir
-	} else {
+	case config.GlobalConfig.ConfigDir != "" && config.GlobalConfig.ConfigDir != defaultConfigDir:
+		// 用户主动选择了非默认位置的配置文件，输出目录跟随配置文件所在目录。
+		// 默认位置（<exe>/config/）保持原有 <exe>/output/ 行为，不破坏现有部署。
+		outputPath = filepath.Join(config.GlobalConfig.ConfigDir, outputDirName)
+	default:
 		outputPath = filepath.Join(basePath, outputDirName)
 	}
 
@@ -70,7 +80,7 @@ func (ls *LocalSaver) Save(yamlData []byte, filename string) error {
 	if err := os.WriteFile(filepath, yamlData, fileMode); err != nil {
 		return fmt.Errorf("写入文件失败 [%s]: %w", filename, err)
 	}
-	slog.Info("保存本地成功", "filepath", filepath)
+	slog.Info("保存本地成功", "路径", filepath)
 
 	return nil
 }

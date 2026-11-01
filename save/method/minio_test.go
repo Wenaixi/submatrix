@@ -1,15 +1,9 @@
-//go:build minio_it
-
-// 依赖本地 MinIO(127.0.0.1:9000,access/secret 均为 123,需有 bucket public)。
-// 默认 go test 不会跑,需要显式带 tag:
-//
-//	go test -tags minio_it ./save/method/ -run TestUploadToS3 -v
 package method
 
 import (
 	"testing"
 
-	"github.com/beck-8/subs-check/config"
+	"github.com/sinspired/subs-check-pro/v3/config"
 )
 
 func TestUploadToS3(t *testing.T) {

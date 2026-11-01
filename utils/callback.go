@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/beck-8/subs-check/config"
+	"github.com/sinspired/subs-check-pro/v3/config"
 )
 
 // ExecuteCallback 执行回调脚本
@@ -19,7 +19,7 @@ func ExecuteCallback(successCount int) {
 		return
 	}
 
-	slog.Info(fmt.Sprintf("执行回调脚本: %s", callbackScript))
+	slog.Info("执行回调脚本", "path", callbackScript)
 
 	// 检查脚本文件是否存在
 	if _, err := os.Stat(callbackScript); os.IsNotExist(err) {
@@ -29,7 +29,7 @@ func ExecuteCallback(successCount int) {
 
 	// 在非Windows系统上检查并设置执行权限
 	if runtime.GOOS != "windows" {
-		err := os.Chmod(callbackScript, 0755) // rwxr-xr-x 权限
+		err := os.Chmod(callbackScript, 0o755) // rwxr-xr-x 权限
 		if err != nil {
 			slog.Warn(fmt.Sprintf("设置脚本执行权限失败: %v", err))
 		}
@@ -52,27 +52,30 @@ func ExecuteCallback(successCount int) {
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
 		// Windows 系统
-		if strings.HasSuffix(strings.ToLower(callbackScript), ".bat") ||
-			strings.HasSuffix(strings.ToLower(callbackScript), ".cmd") {
+		switch ext := strings.ToLower(filepath.Ext(callbackScript)); ext {
+		case ".bat", ".cmd":
 			// 使用完整路径，并正确处理带空格的路径
 			absPath, err := filepath.Abs(callbackScript)
 			if err != nil {
-				slog.Error(fmt.Sprintf("获取脚本绝对路径失败: %v", err))
+				slog.Error("获取脚本绝对路径失败: " + err.Error())
 				return
 			}
 			cmd = exec.Command("cmd", "/C", absPath)
-		} else if strings.HasSuffix(strings.ToLower(callbackScript), ".ps1") {
+
+		case ".ps1":
 			// PowerShell 脚本
 			absPath, err := filepath.Abs(callbackScript)
 			if err != nil {
-				slog.Error(fmt.Sprintf("获取脚本绝对路径失败: %v", err))
+				slog.Error("获取脚本绝对路径失败: " + err.Error())
 				return
 			}
 			// 使用 -ExecutionPolicy Bypass 绕过执行策略限制
 			cmd = exec.Command("powershell", "-ExecutionPolicy", "Bypass", "-File", absPath)
-		} else {
+
+		default:
 			cmd = exec.Command(callbackScript)
 		}
+
 		// 设置工作目录为脚本所在目录
 		cmd.Dir = filepath.Dir(callbackScript)
 	} else {

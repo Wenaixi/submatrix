@@ -2,10 +2,9 @@ package proxies
 
 import (
 	"strconv"
-	"strings"
 	"sync"
 
-	"github.com/biter777/countries"
+	"github.com/sinspired/subs-check-pro/v3/config"
 )
 
 var (
@@ -13,13 +12,26 @@ var (
 	counterLock = sync.Mutex{}
 )
 
-func Rename(name string) string {
+func Rename(name, countryCodeTag string) string {
+	flag := CountryCodeToFlag(name)
+
+	key, label := name, name
+	if config.GlobalConfig.EnhancedTag {
+		if countryCodeTag != "" {
+			key, label = countryCodeTag, countryCodeTag
+		} else if name != "" {
+			// 添加 "ˣ" 角标, 例如: "HKˣ", 以做区分
+			label = name + "ˣ"
+			key = label
+		}
+	}
+
 	counterLock.Lock()
-	defer counterLock.Unlock()
+	counter[key]++
+	n := counter[key]
+	counterLock.Unlock()
 
-	counter[name]++
-	return CountryCodeToFlag(name) + name + "_" + strconv.Itoa(counter[name])
-
+	return flag + label + "_" + strconv.Itoa(n)
 }
 
 // ResetRenameCounter 将所有计数器重置为 0
@@ -30,11 +42,15 @@ func ResetRenameCounter() {
 	counter = make(map[string]int)
 }
 
-func CountryCodeToFlag(countryCode string) string {
-	code := strings.ToUpper(countryCode)
-	country := countries.ByName(code)
-	if country == countries.Unknown {
-		return "❓Other"
+func CountryCodeToFlag(code string) string {
+	if len(code) != 2 {
+		return "🏴‍☠"
 	}
-	return country.Emoji()
+
+	code = string([]rune(code)[0]&^0x20) + string([]rune(code)[1]&^0x20) // 转成大写（ASCII 位运算）
+
+	r1 := rune(code[0]-'A') + 0x1F1E6
+	r2 := rune(code[1]-'A') + 0x1F1E6
+
+	return string([]rune{r1, r2})
 }

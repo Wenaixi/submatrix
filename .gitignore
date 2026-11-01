@@ -1,18 +1,49 @@
+# 忽略前端依赖和构建产物
+node_modules/
+**/node_modules/
+.pnpm-store/
+
 openipdb.ipdb
 config.yaml
 mihomo.yaml
+.golangci-lint.yml
 test
 
+dist/*
 output/*
-config/cache/
-subs-check*
+subs-check-pro*
 mihomo-check*
+log/
 
 .idea
 .vscode
-.claude/
-.qoder/
 
 .DS_Store
-submatrix.exe
+
+*.bak
+*.zip
+*.gz
+*.tar
+bin/
+dist/
+test_*.*
+test_*/
+speed_*.csv
+
+*.old
+*.new
+
 *.exe
+*.syso
+*.test
+.wiki/
+
+# 忽略 IDE 缓存
+.idea/
+.vscode/
+
+!Subs-Check-PRO_OG.png
+monitor.ps1
+.gitignore
+monitor.csv
+monitor.sh

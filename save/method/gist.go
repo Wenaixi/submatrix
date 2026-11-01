@@ -2,16 +2,17 @@ package method
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
-	"strings"
+	"net/url"
 	"time"
 
-	"log/slog"
+	"github.com/goccy/go-json"
 
-	"github.com/beck-8/subs-check/config"
+	"github.com/sinspired/subs-check-pro/v3/config"
+	"github.com/sinspired/subs-check-pro/v3/utils"
 )
 
 var (
@@ -43,10 +44,34 @@ type GistUploader struct {
 // NewGistUploader 创建新的 Gist 上传器
 func NewGistUploader() *GistUploader {
 	if config.GlobalConfig.GithubAPIMirror != "" {
-		gistAPIURL = strings.TrimRight(config.GlobalConfig.GithubAPIMirror, "/") + "/gists"
+		gistAPIURL = config.GlobalConfig.GithubAPIMirror + "/gists"
 	}
+
+	transport := &http.Transport{}
+
+	// 判断系统代理是否可用
+	useProxy := utils.GetSysProxy()
+
+	if useProxy {
+		proxyStr := config.GlobalConfig.SystemProxy
+		proxyURL, perr := url.Parse(proxyStr)
+		if perr != nil {
+			slog.Error("解析配置中的代理 URL 失败，将不使用代理", "proxy_url", proxyStr, "error", perr)
+			transport.Proxy = nil
+		} else {
+			transport.Proxy = http.ProxyURL(proxyURL)
+		}
+	} else {
+		transport.Proxy = nil
+	}
+
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   30 * time.Second,
+	}
+
 	return &GistUploader{
-		client:   &http.Client{Timeout: 30 * time.Second},
+		client:   client,
 		token:    config.GlobalConfig.GithubToken,
 		id:       config.GlobalConfig.GithubGistID,
 		isPublic: false,
@@ -61,8 +86,11 @@ func UploadToGist(yamlData []byte, filename string) error {
 
 // ValiGistConfig 验证Gist配置
 func ValiGistConfig() error {
-	if config.GlobalConfig.GithubToken == "" {
-		return fmt.Errorf("github token未配置")
+	token := config.GlobalConfig.GithubToken
+	hasValidToken := utils.IsValidGitHubToken(token)
+
+	if !hasValidToken {
+		return fmt.Errorf("github token 未配置或格式错误")
 	}
 	if config.GlobalConfig.GithubGistID == "" {
 		return fmt.Errorf("gist id未配置")
@@ -112,7 +140,7 @@ func (g *GistUploader) validateInput(yamlData []byte, filename string) error {
 func (g *GistUploader) uploadWithRetry(jsonData []byte, filename string) error {
 	var lastErr error
 
-	for attempt := 0; attempt < gistMaxRetries; attempt++ {
+	for attempt := range gistMaxRetries {
 		if err := g.doUpload(jsonData); err != nil {
 			lastErr = err
 			slog.Error(fmt.Sprintf("gist上传失败(尝试 %d/%d) %v", attempt+1, gistMaxRetries, err))
@@ -145,7 +173,7 @@ func (g *GistUploader) doUpload(jsonData []byte) error {
 // createRequest 创建HTTP请求
 func (g *GistUploader) createRequest(jsonData []byte) (*http.Request, error) {
 	url := gistAPIURL + "/" + g.id
-	req, err := http.NewRequest("PATCH", url, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("创建请求失败: %w", err)
 	}
