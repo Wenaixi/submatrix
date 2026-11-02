@@ -1,77 +1,103 @@
-// group-matrix.js - SubMatrix 拓扑矩阵可视化交互控制中心
+// group-matrix.js - SubMatrix 拓扑矩阵控制中心 (Claude Design System)
 let currentGroups = [];
-let currentApiKey = localStorage.getItem("apiKey") || "";
+let currentApiKey = localStorage.getItem("apiKey") || "wenxi-admin";
 let currentPort = location.port || "8199";
 
+const OUTLINE_ICONS = {
+  copy: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="9" y="9" width="13" height="13"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+  trash: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
+  check: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><polyline points="20 6 9 17 4 12"/></svg>',
+  alert: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
+};
+
 function showToast(msg, isErr = false) {
+  document.querySelectorAll(".matrix-toast-center").forEach(t => t.remove());
   const toast = document.createElement("div");
-  toast.className = "matrix-toast";
-  toast.style.cssText = `
-    position: fixed; bottom: 24px; right: 24px; z-index: 999999;
-    background: ${isErr ? "#ef4444" : "#18181b"};
-    color: ${isErr ? "#fff" : "#00ffcc"};
-    border: 1px solid ${isErr ? "#dc2626" : "rgba(0, 255, 204, 0.4)"};
-    padding: 10px 18px; font-size: 0.82rem; font-weight: 600;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
-    border-radius: 0; display: flex; align-items: center; gap: 8px;
-    font-family: monospace; transition: opacity 0.3s;
-  `;
-  toast.textContent = (isErr ? "❌ " : "⚡ ") + msg;
+  toast.className = "matrix-toast-center";
+  toast.style.background = isErr ? "#1c1c1f" : "#ffffff";
+  toast.style.color = isErr ? "#ffffff" : "#000000";
+  toast.style.borderColor = isErr ? "#ef4444" : "#ffffff";
+  toast.innerHTML = `<span style="display:inline-flex;align-items:center;gap:8px;">${isErr ? OUTLINE_ICONS.alert : OUTLINE_ICONS.check} ${msg}</span>`;
   document.body.appendChild(toast);
   setTimeout(() => {
     toast.style.opacity = "0";
-    setTimeout(() => toast.remove(), 300);
-  }, 2600);
+    setTimeout(() => toast.remove(), 250);
+  }, 2200);
 }
 
 export async function fetchGroups() {
   try {
     const key = localStorage.getItem("apiKey") || currentApiKey;
-    const res = await fetch(`/api/groups?token=${encodeURIComponent(key)}`, {
+    const res = await fetch(`/api/groups`, {
       headers: { "X-API-Key": key }
     });
-    if (!res.ok) throw new Error("加载分组失败: " + res.status);
+    if (!res.ok) throw new Error("HTTP " + res.status);
     const data = await res.json();
     currentGroups = data.groups || [];
     if (data.apiKey) currentApiKey = data.apiKey;
     if (data.listenPort) currentPort = data.listenPort.replace(":", "");
-    renderGroupMatrixPanel();
+    renderAllViews();
   } catch (e) {
     console.error("加载矩阵分组失败:", e);
-    const container = document.getElementById("panel-groups");
+    const container = document.getElementById("matrixModalCards");
     if (container) {
-      container.innerHTML = `<div style="color:#ef4444;padding:20px;">加载矩阵分组失败，请确认认证状态: ${e.message}</div>`;
+      container.innerHTML = `<div style="color:#a1a1aa;padding:24px;font-family:monospace;font-size:13px;">无法连接到分组 API 端点: ${e.message}</div>`;
     }
   }
 }
 
-export function renderGroupMatrixPanel() {
-  const panel = document.getElementById("panel-groups");
-  if (!panel) return;
+function updateStatsBar() {
+  const total = currentGroups.length;
+  let active = 0;
+  let urlsCount = 0;
+  currentGroups.forEach(g => {
+    const isEnabled = (g.Enabled ?? g.enabled) !== false;
+    if (isEnabled) active++;
+    const urls = g.URLs ?? g.urls ?? [];
+    urlsCount += urls.length;
+  });
 
-  let html = `
-    <div class="matrix-header-bar">
-      <div>
-        <div class="matrix-header-title">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#00ffcc" stroke-width="2">
-            <rect x="3" y="3" width="7" height="7"></rect>
-            <rect x="14" y="3" width="7" height="7"></rect>
-            <rect x="14" y="14" width="7" height="7"></rect>
-            <rect x="3" y="14" width="7" height="7"></rect>
-          </svg>
-          <span>订阅拓扑矩阵管理 (Groups Matrix)</span>
+  const elTotal = document.getElementById("mStatTotal");
+  const elActive = document.getElementById("mStatActive");
+  const elUrls = document.getElementById("mStatUrls");
+  const elPort = document.getElementById("mStatPort");
+  if (elTotal) elTotal.textContent = total;
+  if (elActive) elActive.textContent = active;
+  if (elUrls) elUrls.textContent = urlsCount;
+  if (elPort) elPort.textContent = ":" + currentPort;
+}
+
+export function renderAllViews() {
+  updateStatsBar();
+  const modalCards = document.getElementById("matrixModalCards");
+  const drawerPanel = document.getElementById("panel-groups");
+  const cardsHTML = generateCardsHTML();
+
+  if (modalCards) modalCards.innerHTML = cardsHTML;
+  if (drawerPanel) {
+    drawerPanel.innerHTML = `
+      <div style="padding:14px;border-bottom:1px solid rgba(255,255,255,0.08);display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font-size:14px;font-weight:500;color:#ffffff;">分组矩阵调度</div>
+          <div style="font-size:12px;color:#71717a;">在侧边栏点击可直接唤出大屏中心</div>
         </div>
-        <div class="matrix-header-subtitle">多组级联继承、独立并发测活、失败沉底保护与纯透传聚合调度</div>
+        <button id="drawerOpenModalBtn" class="btn-matrix-white" style="padding:4px 10px;font-size:12px;">全景视图</button>
       </div>
-      <div class="matrix-actions-bar">
-        <button id="btnAddNewGroup" class="btn-matrix-sharp">+ 新增分组</button>
-        <button id="btnSaveGroups" class="btn-matrix-save">💾 保存矩阵</button>
-      </div>
-    </div>
-    <div id="groupsCardsList">
-  `;
+      <div style="padding:12px;">${cardsHTML}</div>
+    `;
+    const openBtn = document.getElementById("drawerOpenModalBtn");
+    if (openBtn) openBtn.addEventListener("click", openMatrixModal);
+  }
 
-  currentGroups.forEach((g, idx) => {
+  bindGroupCardEvents();
+}
+
+function generateCardsHTML() {
+  if (currentGroups.length === 0) {
+    return `<div style="padding:32px;color:#71717a;font-size:13px;text-align:center;">暂无配置分组，请点击右上角 "+ 新增分组"</div>`;
+  }
+
+  return currentGroups.map((g, idx) => {
     const name = g.Name ?? g.name ?? "未命名分组";
     const displayName = g.DisplayName ?? g["display-name"] ?? "";
     const tag = g.Tag ?? g.tag ?? "TAG";
@@ -85,20 +111,20 @@ export function renderGroupMatrixPanel() {
     const urlsText = Array.isArray(urls) ? urls.join("\n") : "";
     const host = location.hostname;
     const protocol = location.protocol;
-    const portStr = currentPort ? (":" + currentPort) : (location.port ? ":" + location.port : "");
+    const portStr = ":" + currentPort;
     const baseLink = `${protocol}//${host}${portStr}/group/${encodeURIComponent(name)}`;
     const tokenQuery = currentApiKey ? `?token=${encodeURIComponent(currentApiKey)}` : "";
 
-    html += `
+    return `
       <div class="group-matrix-card ${isEnabled ? "" : "disabled-group"}" data-index="${idx}">
         <div class="group-card-header">
           <div class="group-identity">
             <span class="group-name-tag">${name}</span>
             <span class="group-badge">${tag}</span>
-            <span style="font-size:0.75rem;color:#71717a;">${displayName}</span>
+            <span style="font-size:12px;color:#71717a;">${displayName}</span>
           </div>
           <div class="sharp-toggle-wrap">
-            <span class="sharp-toggle-label">${isEnabled ? "已启用" : "已禁用"}</span>
+            <span class="sharp-toggle-label">${isEnabled ? "已启用" : "已停用"}</span>
             <label class="matrix-switch">
               <input type="checkbox" class="grp-enable-toggle" data-index="${idx}" ${isEnabled ? "checked" : ""}>
               <span class="matrix-slider"></span>
@@ -106,7 +132,12 @@ export function renderGroupMatrixPanel() {
           </div>
         </div>
 
-        <!-- 4 维独立工业级开关网格 -->
+        <div class="group-preset-strip">
+          <span>快捷预设:</span>
+          <button class="btn-preset-pill btn-set-pass" data-index="${idx}">纯透传模式</button>
+          <button class="btn-preset-pill btn-set-audit" data-index="${idx}">完整质检模式</button>
+        </div>
+
         <div class="group-switches-grid">
           <div class="switch-item">
             <span class="switch-title">连通测活</span>
@@ -138,58 +169,52 @@ export function renderGroupMatrixPanel() {
           </div>
         </div>
 
-        <!-- 参数编辑输入行 -->
         <div class="group-inputs-row">
           <div class="matrix-form-group">
-            <label class="matrix-label">组英文标识 (Name)</label>
-            <input type="text" class="matrix-input inp-name" data-index="${idx}" value="${name}" placeholder="例如: free-a">
+            <label class="matrix-label">组标识 (Name)</label>
+            <input type="text" class="matrix-input inp-name" data-index="${idx}" value="${name}">
           </div>
           <div class="matrix-form-group">
-            <label class="matrix-label">组显示名称 (Display Name)</label>
-            <input type="text" class="matrix-input inp-display-name" data-index="${idx}" value="${displayName}" placeholder="例如: 公网免费A组">
+            <label class="matrix-label">显示名称 (Display Name)</label>
+            <input type="text" class="matrix-input inp-display-name" data-index="${idx}" value="${displayName}">
           </div>
           <div class="matrix-form-group">
-            <label class="matrix-label">节点自定义标签 (Tag)</label>
-            <input type="text" class="matrix-input inp-tag" data-index="${idx}" value="${g.tag || ""}" placeholder="例如: 免费A">
+            <label class="matrix-label">节点标签 (Tag)</label>
+            <input type="text" class="matrix-input inp-tag" data-index="${idx}" value="${tag}">
           </div>
           <div class="matrix-form-group">
             <label class="matrix-label">探测超时 (ms)</label>
-            <input type="number" class="matrix-input inp-timeout" data-index="${idx}" value="${timeout}" placeholder="3000">
+            <input type="number" class="matrix-input inp-timeout" data-index="${idx}" value="${timeout}">
           </div>
         </div>
 
-        <!-- 订阅链接文本域 -->
-        <div class="matrix-form-group" style="margin-bottom:10px;">
-          <label class="matrix-label">该组订阅源 URLs (每行一个，支持子组 http 聚合链接)</label>
-          <textarea class="matrix-textarea inp-urls" data-index="${idx}" placeholder="https://...&#10;http://127.0.0.1:8199/group/free-a/all.yaml?token=...">${urlsText}</textarea>
-        </div>
+        <details class="matrix-urls-accordion">
+          <summary class="matrix-urls-summary">
+            <span>订阅源清单 (${urls.length} 条有效链接)</span>
+            <span style="font-size:12px;color:#71717a;">点击展开 / 收起</span>
+          </summary>
+          <textarea class="matrix-textarea inp-urls" data-index="${idx}" placeholder="每行一个订阅链接">${urlsText}</textarea>
+        </details>
 
-        <!-- 聚合直链快速复制与操作 -->
         <div class="group-footer-bar">
           <div class="direct-copy-group">
-            <span style="font-size:0.72rem;color:#71717a;">组专属订阅:</span>
-            <button class="btn-direct-link btn-copy-link" data-url="${baseLink}/all.yaml${tokenQuery}">📋 复制 Clash</button>
-            <button class="btn-direct-link btn-copy-link" data-url="${baseLink}/mihomo.yaml${tokenQuery}">📋 复制 Mihomo</button>
-            <button class="btn-direct-link btn-copy-link" data-url="${baseLink}/base64.txt${tokenQuery}">📋 复制 Base64</button>
+            <button class="btn-direct-link btn-copy-link" data-url="${baseLink}/all.yaml${tokenQuery}">${OUTLINE_ICONS.copy} 复制 Clash</button>
+            <button class="btn-direct-link btn-copy-link" data-url="${baseLink}/mihomo.yaml${tokenQuery}">${OUTLINE_ICONS.copy} 复制 Mihomo</button>
+            <button class="btn-direct-link btn-copy-link" data-url="${baseLink}/base64.txt${tokenQuery}">${OUTLINE_ICONS.copy} 复制 Base64</button>
           </div>
-          <button class="btn-group-delete btn-del-group" data-index="${idx}">🗑️ 删除此分组</button>
+          <button class="btn-group-delete btn-del-group" data-index="${idx}">${OUTLINE_ICONS.trash} 删除此组</button>
         </div>
       </div>
     `;
-  });
-
-  html += "</div>";
-  panel.innerHTML = html;
-  bindGroupEvents();
+  }).join("");
 }
 
-function bindGroupEvents() {
-  // 1. 复制直链
+function bindGroupCardEvents() {
   document.querySelectorAll(".btn-copy-link").forEach(btn => {
-    btn.addEventListener("click", () => {
+    btn.onclick = () => {
       const url = btn.getAttribute("data-url");
       if (navigator.clipboard) {
-        navigator.clipboard.writeText(url).then(() => showToast("订阅直链已复制至剪贴板！"));
+        navigator.clipboard.writeText(url).then(() => showToast("订阅直链已复制至剪贴板"));
       } else {
         const inp = document.createElement("input");
         inp.value = url;
@@ -197,141 +222,279 @@ function bindGroupEvents() {
         inp.select();
         document.execCommand("copy");
         inp.remove();
-        showToast("订阅直链已复制！");
+        showToast("订阅直链已复制至剪贴板");
       }
-    });
+    };
   });
 
-  // 2. 启用/禁用单组主开关
   document.querySelectorAll(".grp-enable-toggle").forEach(chk => {
-    chk.addEventListener("change", async (e) => {
+    chk.onchange = async (e) => {
       const idx = parseInt(e.target.getAttribute("data-index"), 10);
       const isChecked = e.target.checked;
       const grp = currentGroups[idx];
       if (grp) {
+        grp.Enabled = isChecked;
         grp.enabled = isChecked;
-        const card = e.target.closest(".group-matrix-card");
-        if (card) {
-          card.classList.toggle("disabled-group", !isChecked);
-          const lbl = card.querySelector(".sharp-toggle-label");
-          if (lbl) lbl.textContent = isChecked ? "已启用" : "已禁用";
-        }
+        renderAllViews();
         try {
           const key = localStorage.getItem("apiKey") || currentApiKey;
-          await fetch(`/api/groups/toggle?token=${encodeURIComponent(key)}`, {
+          await fetch(`/api/groups/toggle`, {
             method: "POST",
             headers: { "Content-Type": "application/json", "X-API-Key": key },
-            body: JSON.stringify({ name: grp.name, enabled: isChecked })
+            body: JSON.stringify({ name: grp.Name || grp.name, enabled: isChecked })
           });
-          showToast(`分组 [${grp.name}] 已${isChecked ? "启用" : "停用"}`);
+          showToast(`分组 [${grp.Name || grp.name}] 状态已更新`);
         } catch (err) {
           showToast("状态切换失败: " + err.message, true);
         }
       }
-    });
+    };
   });
 
-  // 3. 字段输入双向绑定
+  document.querySelectorAll(".btn-set-pass").forEach(btn => {
+    btn.onclick = () => {
+      const idx = parseInt(btn.getAttribute("data-index"), 10);
+      if (currentGroups[idx]) {
+        currentGroups[idx].CheckAlive = false;
+        currentGroups[idx]["check-alive"] = false;
+        currentGroups[idx].CheckSpeed = false;
+        currentGroups[idx]["check-speed"] = false;
+        renderAllViews();
+        showToast("已切换为纯透传预设 (关闭测活测速)");
+      }
+    };
+  });
+
+  document.querySelectorAll(".btn-set-audit").forEach(btn => {
+    btn.onclick = () => {
+      const idx = parseInt(btn.getAttribute("data-index"), 10);
+      if (currentGroups[idx]) {
+        currentGroups[idx].CheckAlive = true;
+        currentGroups[idx]["check-alive"] = true;
+        currentGroups[idx].CheckSpeed = false;
+        currentGroups[idx]["check-speed"] = false;
+        renderAllViews();
+        showToast("已切换为质检预设 (开启测活)");
+      }
+    };
+  });
+
   document.querySelectorAll(".inp-name").forEach(inp => {
-    inp.addEventListener("input", (e) => {
-      const idx = parseInt(e.target.getAttribute("data-index"), 10);
-      if (currentGroups[idx]) currentGroups[idx].name = e.target.value.trim();
-    });
-  });
-  document.querySelectorAll(".inp-display-name").forEach(inp => {
-    inp.addEventListener("input", (e) => {
-      const idx = parseInt(e.target.getAttribute("data-index"), 10);
-      if (currentGroups[idx]) currentGroups[idx]["display-name"] = e.target.value.trim();
-    });
-  });
-  document.querySelectorAll(".inp-tag").forEach(inp => {
-    inp.addEventListener("input", (e) => {
-      const idx = parseInt(e.target.getAttribute("data-index"), 10);
-      if (currentGroups[idx]) currentGroups[idx].tag = e.target.value.trim();
-    });
-  });
-  document.querySelectorAll(".inp-timeout").forEach(inp => {
-    inp.addEventListener("input", (e) => {
-      const idx = parseInt(e.target.getAttribute("data-index"), 10);
-      if (currentGroups[idx]) currentGroups[idx].timeout = parseInt(e.target.value, 10) || 3000;
-    });
-  });
-  document.querySelectorAll(".inp-urls").forEach(inp => {
-    inp.addEventListener("input", (e) => {
+    inp.oninput = (e) => {
       const idx = parseInt(e.target.getAttribute("data-index"), 10);
       if (currentGroups[idx]) {
-        currentGroups[idx].urls = e.target.value.split("\n").map(s => s.trim()).filter(Boolean);
+        currentGroups[idx].Name = e.target.value.trim();
+        currentGroups[idx].name = e.target.value.trim();
       }
-    });
+    };
+  });
+  document.querySelectorAll(".inp-display-name").forEach(inp => {
+    inp.oninput = (e) => {
+      const idx = parseInt(e.target.getAttribute("data-index"), 10);
+      if (currentGroups[idx]) {
+        currentGroups[idx].DisplayName = e.target.value.trim();
+        currentGroups[idx]["display-name"] = e.target.value.trim();
+      }
+    };
+  });
+  document.querySelectorAll(".inp-tag").forEach(inp => {
+    inp.oninput = (e) => {
+      const idx = parseInt(e.target.getAttribute("data-index"), 10);
+      if (currentGroups[idx]) {
+        currentGroups[idx].Tag = e.target.value.trim();
+        currentGroups[idx].tag = e.target.value.trim();
+      }
+    };
+  });
+  document.querySelectorAll(".inp-timeout").forEach(inp => {
+    inp.oninput = (e) => {
+      const idx = parseInt(e.target.getAttribute("data-index"), 10);
+      if (currentGroups[idx]) {
+        currentGroups[idx].Timeout = parseInt(e.target.value, 10) || 3000;
+        currentGroups[idx].timeout = currentGroups[idx].Timeout;
+      }
+    };
+  });
+  document.querySelectorAll(".inp-urls").forEach(inp => {
+    inp.oninput = (e) => {
+      const idx = parseInt(e.target.getAttribute("data-index"), 10);
+      if (currentGroups[idx]) {
+        const urls = e.target.value.split("\n").map(s => s.trim()).filter(Boolean);
+        currentGroups[idx].URLs = urls;
+        currentGroups[idx].urls = urls;
+        updateStatsBar();
+      }
+    };
   });
 
-  // 4. 4 项开关双向绑定
   document.querySelectorAll(".sw-check-alive").forEach(chk => {
-    chk.addEventListener("change", (e) => {
+    chk.onchange = (e) => {
       const idx = parseInt(e.target.getAttribute("data-index"), 10);
-      if (currentGroups[idx]) currentGroups[idx]["check-alive"] = e.target.checked;
-    });
+      if (currentGroups[idx]) {
+        currentGroups[idx].CheckAlive = e.target.checked;
+        currentGroups[idx]["check-alive"] = e.target.checked;
+      }
+    };
   });
   document.querySelectorAll(".sw-check-speed").forEach(chk => {
-    chk.addEventListener("change", (e) => {
+    chk.onchange = (e) => {
       const idx = parseInt(e.target.getAttribute("data-index"), 10);
-      if (currentGroups[idx]) currentGroups[idx]["check-speed"] = e.target.checked;
-    });
+      if (currentGroups[idx]) {
+        currentGroups[idx].CheckSpeed = e.target.checked;
+        currentGroups[idx]["check-speed"] = e.target.checked;
+      }
+    };
   });
   document.querySelectorAll(".sw-rename-node").forEach(chk => {
-    chk.addEventListener("change", (e) => {
+    chk.onchange = (e) => {
       const idx = parseInt(e.target.getAttribute("data-index"), 10);
-      if (currentGroups[idx]) currentGroups[idx]["rename-node"] = e.target.checked;
-    });
+      if (currentGroups[idx]) {
+        currentGroups[idx].RenameNode = e.target.checked;
+        currentGroups[idx]["rename-node"] = e.target.checked;
+      }
+    };
   });
   document.querySelectorAll(".sw-drop-on-fail").forEach(chk => {
-    chk.addEventListener("change", (e) => {
+    chk.onchange = (e) => {
       const idx = parseInt(e.target.getAttribute("data-index"), 10);
-      if (currentGroups[idx]) currentGroups[idx]["drop-on-fail"] = e.target.checked;
-    });
+      if (currentGroups[idx]) {
+        currentGroups[idx].DropOnFail = e.target.checked;
+        currentGroups[idx]["drop-on-fail"] = e.target.checked;
+      }
+    };
   });
 
-  // 5. 新增分组
-  const btnAdd = document.getElementById("btnAddNewGroup");
-  if (btnAdd) {
-    btnAdd.addEventListener("click", () => {
-      currentGroups.push({
-        name: "group-" + (currentGroups.length + 1),
-        "display-name": "新分组 " + (currentGroups.length + 1),
-        tag: "GRP",
-        enabled: true,
-        "check-alive": true,
-        "check-speed": false,
-        "rename-node": true,
-        "drop-on-fail": true,
-        timeout: 3000,
-        urls: []
-      });
-      renderGroupMatrixPanel();
-      showToast("已添加新分组模板，编辑后请点击保存");
+  document.querySelectorAll(".btn-del-group").forEach(btn => {
+    btn.onclick = () => {
+      const idx = parseInt(btn.getAttribute("data-index"), 10);
+      const grp = currentGroups[idx];
+      const gName = grp ? (grp.Name || grp.name) : "";
+      if (confirm(`确定删除分组 [${gName}] 吗？`)) {
+        currentGroups.splice(idx, 1);
+        renderAllViews();
+        showToast("已移除分组，点击保存即可写回配置");
+      }
+    };
+  });
+}
+
+export function openMatrixModal() {
+  const modal = document.getElementById("matrixModalOverlay");
+  if (modal) {
+    modal.style.display = "flex";
+    fetchGroups();
+  }
+}
+
+export function closeMatrixModal() {
+  const modal = document.getElementById("matrixModalOverlay");
+  if (modal) {
+    modal.style.display = "none";
+  }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  setTimeout(fetchGroups, 500);
+
+  const navBtn = document.getElementById("groupMatrixNavBtn");
+  if (navBtn) {
+    navBtn.addEventListener("click", () => {
+      openMatrixModal();
     });
   }
 
-  // 6. 删除分组
-  document.querySelectorAll(".btn-del-group").forEach(btn => {
-    btn.addEventListener("click", (e) => {
-      const idx = parseInt(e.target.getAttribute("data-index"), 10);
-      const grp = currentGroups[idx];
-      if (confirm(`确定要删除分组 [${grp ? grp.name : ""}] 吗？`)) {
-        currentGroups.splice(idx, 1);
-        renderGroupMatrixPanel();
-        showToast("已移除分组，点击保存以写入配置");
-      }
-    });
+  const closeBtn = document.getElementById("matrixModalCloseBtn");
+  if (closeBtn) closeBtn.onclick = closeMatrixModal;
+
+  const modalOverlay = document.getElementById("matrixModalOverlay");
+  if (modalOverlay) {
+    modalOverlay.onclick = (e) => {
+      if (e.target === modalOverlay) closeMatrixModal();
+    };
+  }
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeMatrixModal();
   });
 
-  // 7. 保存全量矩阵
-  const btnSave = document.getElementById("btnSaveGroups");
+  const btnBatchPass = document.getElementById("modalBtnBatchPass");
+  if (btnBatchPass) {
+    btnBatchPass.onclick = () => {
+      currentGroups.forEach(g => {
+        g.CheckAlive = false;
+        g["check-alive"] = false;
+        g.CheckSpeed = false;
+        g["check-speed"] = false;
+      });
+      renderAllViews();
+      showToast("所有分组已设为纯透传模式 (跳过测活测速)");
+    };
+  }
+
+  const btnBatchCheck = document.getElementById("modalBtnBatchCheck");
+  if (btnBatchCheck) {
+    btnBatchCheck.onclick = () => {
+      currentGroups.forEach(g => {
+        g.CheckAlive = true;
+        g["check-alive"] = true;
+        g.CheckSpeed = false;
+        g["check-speed"] = false;
+      });
+      renderAllViews();
+      showToast("所有分组已开启测活质检");
+    };
+  }
+
+  const btnEnableAll = document.getElementById("modalBtnEnableAll");
+  if (btnEnableAll) {
+    btnEnableAll.onclick = () => {
+      currentGroups.forEach(g => {
+        g.Enabled = true;
+        g.enabled = true;
+      });
+      renderAllViews();
+      showToast("已全部启用");
+    };
+  }
+
+  const btnDisableAll = document.getElementById("modalBtnDisableAll");
+  if (btnDisableAll) {
+    btnDisableAll.onclick = () => {
+      currentGroups.forEach(g => {
+        g.Enabled = false;
+        g.enabled = false;
+      });
+      renderAllViews();
+      showToast("已全部停用");
+    };
+  }
+
+  const btnAdd = document.getElementById("modalBtnAddGroup");
+  if (btnAdd) {
+    btnAdd.onclick = () => {
+      currentGroups.push({
+        Name: "group-" + (currentGroups.length + 1),
+        DisplayName: "新分组 " + (currentGroups.length + 1),
+        Tag: "GRP",
+        Enabled: true,
+        CheckAlive: true,
+        CheckSpeed: false,
+        RenameNode: true,
+        DropOnFail: true,
+        Timeout: 3000,
+        URLs: []
+      });
+      renderAllViews();
+      showToast("已添加新分组模板");
+    };
+  }
+
+  const btnSave = document.getElementById("modalBtnSave");
   if (btnSave) {
-    btnSave.addEventListener("click", async () => {
+    btnSave.onclick = async () => {
       try {
         const key = localStorage.getItem("apiKey") || currentApiKey;
-        const res = await fetch(`/api/groups?token=${encodeURIComponent(key)}`, {
+        const res = await fetch(`/api/groups`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "X-API-Key": key },
           body: JSON.stringify({ groups: currentGroups })
@@ -340,53 +503,10 @@ function bindGroupEvents() {
           const errData = await res.json();
           throw new Error(errData.error || res.statusText);
         }
-        showToast("分组矩阵配置已成功持久化并即时热重载！");
+        showToast("拓扑矩阵配置已成功持久化并即时热重载");
       } catch (e) {
         showToast("保存失败: " + e.message, true);
       }
-    });
-  }
-}
-
-// 自动初始化与侧边栏联动
-document.addEventListener("DOMContentLoaded", () => {
-  // 页面加载预先载入矩阵分组
-  setTimeout(fetchGroups, 500);
-
-  // 监听侧边栏分组矩阵按钮
-  const navBtn = document.getElementById("groupMatrixNavBtn");
-  if (navBtn) {
-    navBtn.addEventListener("click", () => {
-      const tab = document.querySelector('.cfg-tab[data-tab="groups"]');
-      if (tab) {
-        tab.click();
-        tab.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      }
-      const panel = document.getElementById("panel-groups");
-      if (panel) {
-        panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      }
-    });
-  }
-
-  // 监听抽屉内的 groups tab 点击
-  const groupTab = document.querySelector('.cfg-tab[data-tab="groups"]');
-  if (groupTab) {
-    groupTab.addEventListener("click", () => {
-      document.querySelectorAll(".cfg-panel").forEach(p => p.classList.remove("active"));
-      document.querySelectorAll(".cfg-tab").forEach(t => {
-        t.classList.remove("active");
-        t.setAttribute("aria-selected", "false");
-      });
-      groupTab.classList.add("active");
-      groupTab.setAttribute("aria-selected", "true");
-
-      const panel = document.getElementById("panel-groups");
-      if (panel) {
-        panel.classList.add("active");
-        panel.style.display = "block";
-      }
-      fetchGroups();
-    });
+    };
   }
 });
