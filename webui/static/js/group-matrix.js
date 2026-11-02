@@ -72,26 +72,30 @@ export function renderGroupMatrixPanel() {
   `;
 
   currentGroups.forEach((g, idx) => {
-    const isEnabled = g.enabled !== false;
-    const checkAlive = g["check-alive"] !== false;
-    const checkSpeed = g["check-speed"] === true;
-    const renameNode = g["rename-node"] !== false;
-    const dropOnFail = g["drop-on-fail"] !== false;
-    const timeout = g.timeout || 3000;
-    const urlsText = (g.urls || []).join("\n");
+    const name = g.Name ?? g.name ?? "未命名分组";
+    const displayName = g.DisplayName ?? g["display-name"] ?? "";
+    const tag = g.Tag ?? g.tag ?? "TAG";
+    const isEnabled = (g.Enabled ?? g.enabled) !== false;
+    const checkAlive = (g.CheckAlive ?? g["check-alive"]) !== false;
+    const checkSpeed = (g.CheckSpeed ?? g["check-speed"]) === true;
+    const renameNode = (g.RenameNode ?? g["rename-node"]) !== false;
+    const dropOnFail = (g.DropOnFail ?? g["drop-on-fail"]) !== false;
+    const timeout = g.Timeout ?? g.timeout ?? 3000;
+    const urls = g.URLs ?? g.urls ?? [];
+    const urlsText = Array.isArray(urls) ? urls.join("\n") : "";
     const host = location.hostname;
     const protocol = location.protocol;
     const portStr = currentPort ? (":" + currentPort) : (location.port ? ":" + location.port : "");
-    const baseLink = `${protocol}//${host}${portStr}/group/${encodeURIComponent(g.name || "group")}`;
+    const baseLink = `${protocol}//${host}${portStr}/group/${encodeURIComponent(name)}`;
     const tokenQuery = currentApiKey ? `?token=${encodeURIComponent(currentApiKey)}` : "";
 
     html += `
       <div class="group-matrix-card ${isEnabled ? "" : "disabled-group"}" data-index="${idx}">
         <div class="group-card-header">
           <div class="group-identity">
-            <span class="group-name-tag">${g.name || "未命名分组"}</span>
-            <span class="group-badge">${g.tag || "TAG"}</span>
-            <span style="font-size:0.75rem;color:#71717a;">${g["display-name"] || ""}</span>
+            <span class="group-name-tag">${name}</span>
+            <span class="group-badge">${tag}</span>
+            <span style="font-size:0.75rem;color:#71717a;">${displayName}</span>
           </div>
           <div class="sharp-toggle-wrap">
             <span class="sharp-toggle-label">${isEnabled ? "已启用" : "已禁用"}</span>
@@ -138,11 +142,11 @@ export function renderGroupMatrixPanel() {
         <div class="group-inputs-row">
           <div class="matrix-form-group">
             <label class="matrix-label">组英文标识 (Name)</label>
-            <input type="text" class="matrix-input inp-name" data-index="${idx}" value="${g.name || ""}" placeholder="例如: free-a">
+            <input type="text" class="matrix-input inp-name" data-index="${idx}" value="${name}" placeholder="例如: free-a">
           </div>
           <div class="matrix-form-group">
             <label class="matrix-label">组显示名称 (Display Name)</label>
-            <input type="text" class="matrix-input inp-display-name" data-index="${idx}" value="${g["display-name"] || ""}" placeholder="例如: 公网免费A组">
+            <input type="text" class="matrix-input inp-display-name" data-index="${idx}" value="${displayName}" placeholder="例如: 公网免费A组">
           </div>
           <div class="matrix-form-group">
             <label class="matrix-label">节点自定义标签 (Tag)</label>
