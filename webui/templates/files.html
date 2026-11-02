@@ -797,7 +797,7 @@
     const API_KEY = getAuthKey();
     const fetchHeaders = { "X-API-Key": API_KEY };
 
-    // 🌟 核心：检测是否在 Wails (Android/桌面客户端) 环境中
+    //  核心：检测是否在 Wails (Android/桌面客户端) 环境中
     const isWails = !!window.__WAILS_GUI;
 
     // ── 页面加载完毕后立即获取数据 ──
@@ -843,7 +843,7 @@
     function renderShareEntries(hasPassword) {
       const container = document.getElementById("shareEntriesContainer");
 
-      // 🌟 核心：如果是安卓Wails环境，直接拼接后端真实地址。
+      //  核心：如果是安卓Wails环境，直接拼接后端真实地址。
       // 配合 target="_blank"，安卓会跳出 App 拉起外部浏览器，彻底摆脱 Webview 环境限制！
       const shareLink = isWails ? (window.__WAILS_GUI.baseURL + "/sub/") : "/sub/";
       const moreLink = isWails ? (window.__WAILS_GUI.baseURL + "/more/") : "/more/";
@@ -896,7 +896,7 @@
 
       let html = "";
       files.forEach(f => {
-        // 🌟 核心修改：如果是 Wails 环境，直接使用真实的绝对地址；否则使用相对路径
+        //  核心修改：如果是 Wails 环境，直接使用真实的绝对地址；否则使用相对路径
         const linkUrl = isWails ? window.__WAILS_GUI.baseURL + f.route : f.route;
 
         html += `

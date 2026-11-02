@@ -1,119 +1,220 @@
 /* ═════════════════════════════════════════════════════════════════════
-   SubMatrix Industrial Brutalist UI - 去圆角顶级工业级设计规范
+   SubMatrix Pure Monochrome Minimalist UI
+   纯黑白瑞士极简主义与硬核工业美学规范
    ═════════════════════════════════════════════════════════════════════ */
 
-/* 1. 全局去圆角化：利落、硬核、极客切边 */
+/* 1. 彻底去圆角：纯粹几何直角切边 */
 *, *::before, *::after {
   border-radius: 0 !important;
 }
 
-/* 2. 微质感徽章允许 1px 微修角 */
-.badge, .tag-badge {
-  border-radius: 1px !important;
+/* 2. 覆盖所有花哨强调色为纯白/纯黑高对比度 */
+:root {
+  --accent: #ffffff !important;
+  --accent-light: rgba(255, 255, 255, 0.2) !important;
+  --accent-hover: #e4e4e7 !important;
+  --border-active: #ffffff !important;
 }
 
-/* 3. 边框硬朗精准切线与质感增强 */
-.card, .sidebar, .progress-card, .logs-card, .cfg-drawer, .cfg-panel,
-.btn, .icon-btn, input, select, textarea, progress, .slide-menu,
-.group-matrix-card, .toggle-btn, .history-card {
-  border-radius: 0 !important;
-  border-width: 1px !important;
-  box-shadow: none !important;
+/* 3. 页面顶部与品牌微标纯白化 */
+.sidebar-brand .brand-title, .brand-title span, .brand-matrix, .logo-suffix {
+  color: #ffffff !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.5px !important;
 }
 
-/* 4. 等宽数字与技术排印 */
+.sidebar-brand .brand-subtitle {
+  color: #71717a !important;
+}
+
+/* 4. 等宽排印与精密线框 */
 .stat-val, .progress-info span, #progressText, .link-text, code, pre,
-.matrix-input, .matrix-textarea {
+.matrix-input, .matrix-textarea, .matrix-mono {
   font-variant-numeric: tabular-nums;
-  font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
+  font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace !important;
 }
 
-/* 5. 分组矩阵 (Groups Matrix) 专属视觉面板 */
-.matrix-header-bar {
+/* 5. 沉浸式全景矩阵调度中心 (Modal Overlay) */
+.matrix-modal-overlay {
+  position: fixed;
+  top: 0; left: 0; width: 100vw; height: 100vh;
+  background: rgba(0, 0, 0, 0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+.matrix-modal-container {
+  width: 100%;
+  max-width: 1280px;
+  max-height: 92vh;
+  background: #09090b;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.95);
+  overflow: hidden;
+}
+
+/* 模态框顶部导航栏 */
+.matrix-modal-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 14px;
-  background: rgba(24, 24, 27, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  margin-bottom: 14px;
+  padding: 16px 20px;
+  background: #111113;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
-.matrix-header-title {
-  font-size: 0.95rem;
-  font-weight: 700;
-  color: #fff;
+.matrix-modal-brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
 }
 
-.matrix-header-subtitle {
-  font-size: 0.75rem;
-  color: #a1a1aa;
+.matrix-modal-title {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #ffffff;
+  letter-spacing: 0.8px;
+}
+
+.matrix-modal-subtitle {
+  font-size: 0.72rem;
+  color: #71717a;
   margin-top: 2px;
 }
 
-.matrix-actions-bar {
+.matrix-top-actions {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
-.btn-matrix-sharp {
-  background: #18181b;
-  border: 1px solid rgba(0, 255, 204, 0.4);
-  color: #00ffcc;
-  padding: 5px 12px;
+/* 纯黑白功能按钮系统 */
+.btn-matrix-white {
+  background: #ffffff;
+  color: #000000;
+  border: 1px solid #ffffff;
+  padding: 6px 16px;
   font-size: 0.78rem;
-  font-weight: 600;
+  font-weight: 800;
   cursor: pointer;
   transition: all 0.15s ease;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
 }
 
-.btn-matrix-sharp:hover {
-  background: #00ffcc;
-  color: #09090b;
-  border-color: #00ffcc;
+.btn-matrix-white:hover {
+  background: #d4d4d8;
+  border-color: #d4d4d8;
+  color: #000000;
 }
 
-.btn-matrix-save {
-  background: #00ffcc;
-  color: #09090b;
-  border: 1px solid #00ffcc;
-  padding: 5px 14px;
-  font-size: 0.78rem;
+.btn-matrix-action {
+  background: #18181b;
+  color: #d4d4d8;
+  border: 1px solid #27272a;
+  padding: 6px 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-matrix-action:hover {
+  background: #27272a;
+  border-color: #ffffff;
+  color: #ffffff;
+}
+
+.btn-matrix-close {
+  background: transparent;
+  color: #71717a;
+  border: 1px solid #27272a;
+  padding: 6px 12px;
+  font-size: 0.85rem;
   font-weight: 700;
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
-.btn-matrix-save:hover {
-  background: #10b981;
-  border-color: #10b981;
-  color: #fff;
+.btn-matrix-close:hover {
+  border-color: #ffffff;
+  color: #ffffff;
+  background: #18181b;
 }
 
-/* 6. 分组卡片 (Group Card) */
+/* 状态指示总览条 */
+.matrix-stats-bar {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 10px 20px;
+  background: #000000;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-wrap: wrap;
+}
+
+.matrix-stat-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: #71717a;
+}
+
+.matrix-stat-item strong {
+  color: #ffffff;
+  font-weight: 700;
+  font-family: monospace;
+}
+
+/* 卡片双栏响应式网格容器 */
+.matrix-cards-grid {
+  padding: 20px;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(480px, 1fr));
+  gap: 16px;
+  background: #09090b;
+}
+
+@media (max-width: 900px) {
+  .matrix-cards-grid {
+    grid-template-columns: 1fr;
+    padding: 12px;
+  }
+}
+
+/* 单个分组卡片 */
 .group-matrix-card {
-  background: rgba(18, 19, 22, 0.9);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  padding: 16px;
-  margin-bottom: 14px;
+  background: #101012;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
   transition: border-color 0.2s, background-color 0.2s;
 }
 
 .group-matrix-card:hover {
-  border-color: rgba(0, 255, 204, 0.45);
+  border-color: rgba(255, 255, 255, 0.35);
 }
 
 .group-matrix-card.disabled-group {
-  opacity: 0.58;
+  opacity: 0.45;
   border-style: dashed;
-  background: rgba(14, 14, 16, 0.6);
+  background: #070708;
 }
 
 /* 卡片顶部标题栏 */
@@ -123,49 +224,51 @@
   justify-content: space-between;
   padding-bottom: 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  margin-bottom: 14px;
 }
 
 .group-identity {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .group-name-tag {
-  font-size: 1rem;
-  font-weight: 700;
-  color: #00ffcc;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #ffffff;
   letter-spacing: 0.5px;
 }
 
 .group-badge {
-  font-size: 0.7rem;
-  padding: 2px 7px;
-  background: rgba(0, 255, 204, 0.12);
-  border: 1px solid rgba(0, 255, 204, 0.35);
-  color: #00ffcc;
+  font-size: 0.68rem;
+  padding: 2px 8px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  color: #ffffff;
   text-transform: uppercase;
+  font-weight: 600;
 }
 
-/* 工业级矩形直角滑动开关 */
+/* 迪特·拉姆斯式高对比度矩形机械滑动开关 */
 .sharp-toggle-wrap {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   cursor: pointer;
   user-select: none;
 }
 
 .sharp-toggle-label {
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   color: #a1a1aa;
+  font-weight: 600;
 }
 
 .matrix-switch {
   position: relative;
-  width: 38px;
-  height: 20px;
+  width: 36px;
+  height: 18px;
   display: inline-block;
   cursor: pointer;
 }
@@ -179,7 +282,7 @@
 .matrix-slider {
   position: absolute;
   top: 0; left: 0; right: 0; bottom: 0;
-  background-color: #27272a;
+  background-color: #18181b;
   border: 1px solid #3f3f46;
   transition: 0.15s ease;
 }
@@ -187,34 +290,57 @@
 .matrix-slider:before {
   position: absolute;
   content: "";
-  height: 12px;
-  width: 12px;
+  height: 10px;
+  width: 10px;
   left: 3px;
   bottom: 3px;
   background-color: #71717a;
   transition: 0.15s ease;
 }
 
+/* 激活状态：纯白轨道 + 纯黑内芯 (极致高对比) */
 .matrix-switch input:checked + .matrix-slider {
-  background-color: rgba(0, 255, 204, 0.15);
-  border-color: #00ffcc;
+  background-color: #ffffff;
+  border-color: #ffffff;
 }
 
 .matrix-switch input:checked + .matrix-slider:before {
   transform: translateX(18px);
-  background-color: #00ffcc;
-  box-shadow: 0 0 6px rgba(0, 255, 204, 0.7);
+  background-color: #000000;
 }
 
-/* 参数开关网格 */
+/* 单组快捷预设标签条 */
+.group-preset-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.72rem;
+  color: #71717a;
+}
+
+.btn-preset-pill {
+  background: transparent;
+  border: 1px solid #27272a;
+  color: #a1a1aa;
+  padding: 2px 8px;
+  font-size: 0.68rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-preset-pill:hover {
+  border-color: #ffffff;
+  color: #ffffff;
+}
+
+/* 4 项独立开关网格 */
 .group-switches-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  gap: 12px;
-  background: rgba(0, 0, 0, 0.25);
+  gap: 10px;
+  background: #000000;
   padding: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  margin-bottom: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .switch-item {
@@ -226,14 +352,14 @@
 .switch-title {
   font-size: 0.75rem;
   color: #d4d4d8;
+  font-weight: 500;
 }
 
 /* 参数输入行 */
 .group-inputs-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 10px;
-  margin-bottom: 12px;
 }
 
 .matrix-form-group {
@@ -243,41 +369,66 @@
 }
 
 .matrix-label {
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   color: #71717a;
   text-transform: uppercase;
+  font-weight: 600;
 }
 
 .matrix-input {
-  background: #18181b;
+  background: #000000;
   border: 1px solid #27272a;
-  color: #f4f4f5;
-  padding: 5px 8px;
+  color: #ffffff;
+  padding: 6px 8px;
   font-size: 0.8rem;
   outline: none;
+  transition: border-color 0.15s;
 }
 
 .matrix-input:focus {
-  border-color: #00ffcc;
+  border-color: #ffffff;
 }
 
-/* 订阅源文本域 */
+/* 折叠式订阅源区域 (告别杂乱长文本) */
+.matrix-urls-accordion {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #000000;
+}
+
+.matrix-urls-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.75rem;
+  color: #a1a1aa;
+}
+
+.matrix-urls-summary:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.03);
+}
+
 .matrix-textarea {
   width: 100%;
-  min-height: 80px;
-  background: #18181b;
-  border: 1px solid #27272a;
-  color: #a1a1aa;
-  padding: 8px;
+  box-sizing: border-box;
+  min-height: 90px;
+  background: #09090b;
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  color: #d4d4d8;
+  padding: 10px;
   font-size: 0.75rem;
-  line-height: 1.4;
+  line-height: 1.5;
   resize: vertical;
   outline: none;
 }
 
 .matrix-textarea:focus {
-  border-color: #00ffcc;
-  color: #fff;
+  background: #000000;
+  color: #ffffff;
 }
 
 /* 直链复制与操作栏 */
@@ -287,9 +438,8 @@
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 12px;
   padding-top: 10px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .direct-copy-group {
@@ -300,30 +450,51 @@
 }
 
 .btn-direct-link {
-  background: #121316;
+  background: #18181b;
   border: 1px solid #27272a;
-  color: #a1a1aa;
+  color: #ffffff;
   font-size: 0.72rem;
-  padding: 4px 8px;
+  font-weight: 600;
+  padding: 5px 10px;
   cursor: pointer;
   transition: all 0.15s;
 }
 
 .btn-direct-link:hover {
-  border-color: #00ffcc;
-  color: #00ffcc;
+  background: #ffffff;
+  color: #000000;
+  border-color: #ffffff;
 }
 
 .btn-group-delete {
   background: transparent;
-  border: 1px solid rgba(239, 68, 68, 0.4);
-  color: #ef4444;
+  border: 1px solid #27272a;
+  color: #71717a;
   font-size: 0.72rem;
   padding: 4px 10px;
   cursor: pointer;
+  transition: all 0.15s;
 }
 
 .btn-group-delete:hover {
-  background: #ef4444;
-  color: #fff;
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+/* 顶部悬浮 Toast 反馈通知 */
+.matrix-toast-center {
+  position: fixed;
+  top: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #ffffff;
+  color: #000000;
+  border: 1px solid #ffffff;
+  padding: 8px 24px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  font-family: monospace;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
+  z-index: 1000000;
+  transition: opacity 0.3s ease, transform 0.3s ease;
 }

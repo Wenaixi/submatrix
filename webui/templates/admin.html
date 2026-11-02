@@ -53,7 +53,7 @@
             <small class="slogan">订阅拓扑矩阵 · 高精管理</small>
           </div>
           <div class="pro-plus-wrap">
-            <span class="pro-plus-golden">⁺</span>
+            <span class="">⁺</span>
           </div>
           <span id="versionInline-mobile" class="version btn" aria-hidden="true"></span>
         </div>
@@ -65,8 +65,8 @@
       <a href="/sub-store/" target="_blank" rel="noopener" class="icon-btn" title="直通 Sub-Store" aria-label="Sub-Store" style="display:flex;align-items:center;color:inherit;text-decoration:none;margin-right:12px;font-size:0.82rem;font-weight:600;padding:3px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.2);">Sub-Store</a>
       <div class="theme-toggle" role="group" aria-label="主题切换" style="display:flex;align-items:center;">
         <button id="mainThemeToggle" class="icon-btn" aria-pressed="false" aria-label="切换主题" title="切换主题">
-          <!-- <span class="icon" id="iconMoon">☀️</span>
-          <span class="icon" id="iconSun" style="display:none;margin-bottom: 3px;">🌙</span> -->
+          <!-- <span class="icon" id="iconMoon"></span>
+          <span class="icon" id="iconSun" style="display:none;margin-bottom: 3px;"></span> -->
 
           <svg class="icon" id="iconMoon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             stroke-width="2" style="display: none;">
@@ -212,8 +212,8 @@
                 <img src="/static/icon/favicon.svg" alt="logo" class="sb-logo" />
               </a>
               <div class="sb-info">
-                <div class="sb-name">SubMatrix<span class="sb-pro pro-plus-golden"> Matrix</span></div>
-                <div class="sb-sub">订阅拓扑矩阵 · 智能测活画像</div>
+                <div class="sb-name">SubMatrix</div>
+                <div class="sb-sub">拓扑矩阵 · 极简架构调度</div>
               </div>
             </div>
 
@@ -610,7 +610,7 @@
           l-.06.06a1.65 1.65 0 0 0-.33 1.82v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4
           h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
                 </svg>
-                <!-- ★ 标题缩短 -->
+                <!--  标题缩短 -->
                 <span id="editorCardTitle" class="title-text">配置</span>
               </div>
 
@@ -843,6 +843,54 @@
   <script src="/static/js/reg-sw.js??v202606082401"></script>
   <script type="module" src="/static/js/group-matrix.js"></script>
   <!-- 侧边栏主题切换 & 登录框主题切换 代理到主按钮，并同步小屏 header 版本角标 -->
+
+  <!-- ══ SubMatrix 沉浸式分组拓扑矩阵调度中心 (Claude Design System) ══ -->
+  <div id="matrixModalOverlay" class="matrix-modal-overlay" style="display:none;" role="dialog" aria-modal="true" aria-label="SubMatrix 分组矩阵控制中心">
+    <div class="matrix-modal-container">
+      <div class="matrix-modal-header">
+        <div class="matrix-modal-brand">
+          <svg width="22" height="22" viewBox="0 0 100 100" fill="none">
+            <rect width="100" height="100" fill="#000000" />
+            <path d="M25 25 H75 M25 50 H75 M25 75 H75 M25 25 V75 M50 25 V75 M75 25 V75" stroke="#FFFFFF" stroke-width="6" stroke-linecap="square"/>
+            <rect x="17" y="17" width="16" height="16" fill="#000000" stroke="#FFFFFF" stroke-width="6" />
+            <rect x="42" y="17" width="16" height="16" fill="#000000" stroke="#FFFFFF" stroke-width="6" />
+            <rect x="67" y="17" width="16" height="16" fill="#000000" stroke="#FFFFFF" stroke-width="6" />
+            <rect x="17" y="42" width="16" height="16" fill="#000000" stroke="#FFFFFF" stroke-width="6" />
+            <rect x="42" y="42" width="16" height="16" fill="#000000" stroke="#FFFFFF" stroke-width="6" />
+            <rect x="67" y="42" width="16" height="16" fill="#000000" stroke="#FFFFFF" stroke-width="6" />
+            <rect x="17" y="67" width="16" height="16" fill="#000000" stroke="#FFFFFF" stroke-width="6" />
+            <rect x="42" y="67" width="16" height="16" fill="#000000" stroke="#FFFFFF" stroke-width="6" />
+            <rect x="67" y="67" width="16" height="16" fill="#000000" stroke="#FFFFFF" stroke-width="6" />
+          </svg>
+          <div>
+            <div class="matrix-modal-title">SubMatrix 拓扑矩阵控制中心</div>
+            <div class="matrix-modal-subtitle">多组级联继承 · 纯透传聚合调度 · 节点流控</div>
+          </div>
+        </div>
+
+        <div class="matrix-top-actions">
+          <button id="modalBtnBatchPass" class="btn-matrix-action">一键全透传预设</button>
+          <button id="modalBtnBatchCheck" class="btn-matrix-action">一键全质检预设</button>
+          <button id="modalBtnEnableAll" class="btn-matrix-action">全部启用</button>
+          <button id="modalBtnDisableAll" class="btn-matrix-action">全部停用</button>
+          <button id="modalBtnAddGroup" class="btn-matrix-action">+ 新增分组</button>
+          <button id="modalBtnSave" class="btn-matrix-white">保存配置</button>
+          <button id="matrixModalCloseBtn" class="btn-matrix-close" aria-label="关闭">✕</button>
+        </div>
+      </div>
+
+      <div class="matrix-stats-bar">
+        <div class="matrix-stat-item"><span>分组总数</span><strong id="mStatTotal">3</strong></div>
+        <div class="matrix-stat-item"><span>活跃运行</span><strong id="mStatActive">3</strong></div>
+        <div class="matrix-stat-item"><span>公网源总数</span><strong id="mStatUrls">23</strong></div>
+        <div class="matrix-stat-item"><span>统一服务端口</span><strong id="mStatPort">:8199</strong></div>
+        <div class="matrix-stat-item"><span>反向代理引擎</span><strong>Sub-Store 127.0.0.1:8299</strong></div>
+      </div>
+
+      <div id="matrixModalCards" class="matrix-cards-grid"></div>
+    </div>
+  </div>
+
 </body>
 
 </html>
