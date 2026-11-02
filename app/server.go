@@ -417,6 +417,14 @@ func (app *App) authMiddleware() gin.HandlerFunc {
 			apiKey, _ = c.Cookie("scp_api_key")
 		}
 
+		// 3. 如果还是没有，尝试从 URL Query 参数读取 (客户端订阅直链常用 ?token=xxx 或 ?api_key=xxx)
+		if apiKey == "" {
+			apiKey = c.Query("api_key")
+			if apiKey == "" {
+				apiKey = c.Query("token")
+			}
+		}
+
 		if subtle.ConstantTimeCompare([]byte(apiKey), []byte(config.GlobalConfig.APIKey)) != 1 {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "无效的API密钥"})
 			return
