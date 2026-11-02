@@ -682,17 +682,31 @@ func (pc *ProxyChecker) distributeJobs(proxies []map[string]any, ctx context.Con
 				mapping := proxies[index]
 
 				// 任务取出后，立即断开源切片的引用
-				// 此时，如果 mapping 没被后续 CreateClient 引用，它就是垃圾；
-				// 如果 mapping 被传给了 Client，等 Job.Close() 时它也会变成垃圾。
 				proxies[index] = nil
 
 				// 周期性强制归还内存
-				// 只有当索引达到阈值倍数时触发
 				if index > 0 && index%gcThreshold == 0 {
 					go func(currentIdx int64) {
 						slog.Debug("已处理 " + strconv.FormatInt(currentIdx, 10) + " 个节点，正在执行主动内存回收...")
 						debug.FreeOSMemory()
 					}(index)
+				}
+
+				// 组级特性注入与协议过滤
+				subTag, _ := mapping["sub_tag"].(string)
+				subURL, _ := mapping["sub_url"].(string)
+				grp := FindGroupByTagOrURL(subTag, subURL)
+
+				// 协议过滤：如果命中了该组设置的过滤协议（默认过滤 http），直接丢弃该节点，不进行后续测活与测速
+				pType := strings.ToLower(fmt.Sprintf("%v", mapping["type"]))
+				if grp.MatchesProtocol(pType) {
+					pc.pt.CountAlive(false)
+					continue
+				}
+
+				// 组级前置代理注入：测活与测速均走此代理
+				if grp.Proxy != "" {
+					mapping["group_proxy"] = grp.Proxy
 				}
 
 				cli := CreateClient(mapping)
@@ -1439,8 +1453,17 @@ func CreateClient(mapping map[string]any) (client *ProxyClient) {
 
 	var err error
 
-	// 解析代理
-	pc.mProxy, err = adapter.ParseProxy(mapping)
+	// 解析代理：如果该节点所属分组配置了专用代理，则注入 GroupProxyDialer 前置代理拨号器
+	if groupProxy, ok := mapping["group_proxy"].(string); ok && strings.TrimSpace(groupProxy) != "" {
+		if dialer, dialErr := NewGroupProxyDialer(groupProxy); dialErr == nil && dialer != nil {
+			pc.mProxy, err = adapter.ParseProxy(mapping, adapter.WithDialerForAPI(dialer))
+		} else {
+			pc.mProxy, err = adapter.ParseProxy(mapping)
+		}
+	} else {
+		pc.mProxy, err = adapter.ParseProxy(mapping)
+	}
+
 	if err != nil {
 		slog.Debug("底层mihomo创建代理Client失败", "error", err)
 		return nil

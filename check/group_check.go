@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/sinspired/subs-check-pro/v3/config"
 )
 
 // DeduplicateProxies 按 server:port:type 物理特征对节点列表去重
@@ -60,3 +61,25 @@ func extractRootOriginalName(raw string) string {
 	}
 	return raw
 }
+
+// FindGroupByTagOrURL 在所有有效分组中匹配所属组（转发至 config.FindGroupByTagOrURL）
+func FindGroupByTagOrURL(tag, subURL string) config.ResolvedGroupConfig {
+	return config.FindGroupByTagOrURL(tag, subURL)
+}
+
+// FilterProxiesByGroup 根据组的协议过滤规则过滤节点列表
+func FilterProxiesByGroup(grp config.ResolvedGroupConfig, proxies []map[string]any) []map[string]any {
+	res := make([]map[string]any, 0, len(proxies))
+	for _, p := range proxies {
+		if p == nil {
+			continue
+		}
+		typ := strings.ToLower(fmt.Sprintf("%v", p["type"]))
+		if grp.MatchesProtocol(typ) {
+			continue
+		}
+		res = append(res, p)
+	}
+	return res
+}
+

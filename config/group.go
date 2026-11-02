@@ -171,3 +171,27 @@ func filterCleanUrls(raw []string) []string {
 	}
 	return out
 }
+
+// FindGroupByTagOrURL 在所有有效分组中匹配所属组，若未匹配则返回全局默认组配置
+func FindGroupByTagOrURL(tag, subURL string) ResolvedGroupConfig {
+	cfg := Config{}
+	if GlobalConfig != nil {
+		cfg = *GlobalConfig
+	}
+	groups := ResolveAllGroups(cfg)
+	for _, g := range groups {
+		if tag != "" && (g.Tag == tag || g.Name == tag || g.DisplayName == tag) {
+			return g
+		}
+		for _, u := range g.URLs {
+			if u == subURL {
+				return g
+			}
+		}
+	}
+	if len(groups) > 0 {
+		return groups[0]
+	}
+	return ResolveGroup(GroupConfig{}, cfg)
+}
+

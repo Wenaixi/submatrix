@@ -848,6 +848,17 @@ func processSubscription(
 			return true
 		}
 
+		// 组级协议过滤与代理绑定（默认排除 http 明文协议等）
+		nodeType := strings.ToLower(fmt.Sprintf("%v", node["type"]))
+		grp := config.FindGroupByTagOrURL(tag, urlStr)
+		if grp.MatchesProtocol(nodeType) {
+			slog.Debug("协议过滤命中，跳过该协议节点", "组", grp.Name, "协议", nodeType, "节点", node["name"])
+			return true
+		}
+		if grp.Proxy != "" {
+			node["group_proxy"] = grp.Proxy
+		}
+
 		hasValid = true
 
 		// 订阅内去重（减少对全局 map 和 channel 的压力）
