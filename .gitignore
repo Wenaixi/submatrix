@@ -50,3 +50,6 @@ monitor.sh
 
 screenshots/
 config/cache/
+
+!webui/static/dist/
+!webui/static/dist/*

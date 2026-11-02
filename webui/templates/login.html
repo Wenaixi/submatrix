@@ -3,50 +3,69 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <meta name="theme-color" content="#ffffff" />
-  <title>SubMatrix · 认证登录</title>
+  <title>SubMatrix · 系统登录</title>
   <link rel="icon" type="image/svg+xml" href="/static/icon/favicon.svg" />
-  <link rel="stylesheet" href="/static/css/admin.css">
+  <link rel="stylesheet" href="/static/dist/app.css" />
   <style>
-    body, html { margin: 0; padding: 0; height: 100vh; overflow: hidden; background: var(--bg); }
-    .login-modal { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 1; }
+    body {
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--surface-1);
+    }
+    .login-box {
+      width: 100%;
+      max-width: 380px;
+      padding: 32px 28px;
+      background: var(--surface-0);
+      border: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
   </style>
-  <link rel="stylesheet" href="/static/css/submatrix-sharp.css">
 </head>
 <body>
-  <div id="loginModal" class="login-modal" role="dialog" aria-modal="true">
-    <canvas id="login-cv"></canvas>
-    
-    <button id="loginThemeToggle" class="login-theme-btn icon-btn" style="position: absolute; top: 20px; right: 20px; z-index: 2;" title="切换主题">
-      <svg id="loginIconMoon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
-      <svg id="loginIconSun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
-    </button>
-
-    <div class="login-card">
-      <div class="login-logo"><img src="/static/icon/favicon.svg" alt="logo" style="width:100px;height:100px" /></div>
-      <h3 class="login-title">Subs-Check<span class="pro-plus-golden login-plus">⁺</span> <span class="login-text">登录</span>
-        <a href="https://github.com/Wenaixi/submatrix" class="version-badge" id="version-badge">
-          <span id="version-login">-</span>
-        </a>
-      </h3>
-
-      <div class="input-wrapper">
-        <input id="apiKeyInput" class="login-input" type="password" placeholder="请输入 API 密钥" />
-        <button type="button" id="show-apikey" class="show-apikey">显示</button>
+  <div class="login-box">
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <svg width="28" height="28" viewBox="0 0 100 100" fill="none">
+        <rect width="100" height="100" fill="#000000" />
+        <path d="M25 25 H75 M25 50 H75 M25 75 H75 M25 25 V75 M50 25 V75 M75 25 V75" stroke="#FFFFFF" stroke-width="5" stroke-linecap="square"/>
+        <rect x="17" y="17" width="16" height="16" fill="#000000" stroke="#FFFFFF" stroke-width="5" />
+        <rect x="42" y="17" width="16" height="16" fill="#000000" stroke="#FFFFFF" stroke-width="5" />
+        <rect x="67" y="17" width="16" height="16" fill="#000000" stroke="#FFFFFF" stroke-width="5" />
+        <rect x="17" y="42" width="16" height="16" fill="#000000" stroke="#FFFFFF" stroke-width="5" />
+        <rect x="42" y="42" width="16" height="16" fill="#000000" stroke="#FFFFFF" stroke-width="5" />
+        <rect x="67" y="42" width="16" height="16" fill="#000000" stroke="#FFFFFF" stroke-width="5" />
+        <rect x="17" y="67" width="16" height="16" fill="#000000" stroke="#FFFFFF" stroke-width="5" />
+        <rect x="42" y="67" width="16" height="16" fill="#000000" stroke="#FFFFFF" stroke-width="5" />
+        <rect x="67" y="67" width="16" height="16" fill="#000000" stroke="#FFFFFF" stroke-width="5" />
+      </svg>
+      <div>
+        <h2 style="font-size: 18px; font-weight: 500; color: var(--text-primary); margin: 0;">SubMatrix</h2>
+        <div style="font-size: 11px; color: var(--text-secondary);">系统访问认证</div>
       </div>
-
-      <div class="remember-wrapper">
-        <label class="remember-row" style="display:flex;align-items:center;gap:4px">
-          <input id="rememberKey" type="checkbox" checked /> 记住密钥
-        </label>
-      </div>
-
-      <div class="login-actions">
-        <button id="login-button" class="btn">进入管理界面</button>
-      </div>
-      <div id="loginError" style="color: var(--danger); font-size: 13px; text-align: center; margin-top: 10px; display: none;"></div>
     </div>
+
+    <div>
+      <label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 4px;">API 访问密钥 (API Key)</label>
+      <input id="apiKeyInput" type="password" placeholder="请输入 API Key 凭证..." />
+    </div>
+
+    <div style="display: flex; align-items: center; justify-content: space-between; font-size: 12px;">
+      <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+        <input id="rememberKey" type="checkbox" checked /> 记住凭证
+      </label>
+      <button type="button" id="show-apikey" class="btn-ghost" style="padding: 2px 6px; font-size: 11px;">显示明文</button>
+    </div>
+
+    <button id="login-button" class="btn-primary" style="width: 100%; padding: 8px;">进入控制台</button>
+    <div id="loginError" style="color: #ef4444; font-size: 12px; text-align: center; display: none;"></div>
   </div>
+
   <script src="/static/js/login.js"></script>
 </body>
 </html>
