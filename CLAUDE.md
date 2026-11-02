@@ -61,3 +61,9 @@ SubMatrix 是从 `sinspired/subs-check-pro/v3` 深度独立分支演进的高性
 - **Go 后端鉴权兼容与 JSON Tags 补全**: 修复了属性反序列化回退与页面鉴权缺陷；
 - **双架构云端自动化**: GitHub Actions 成功构建 amd64 + arm64 双架构镜像并发布至 Docker Hub 官方镜像库 (`wenxiloveyou/submatrix:latest`)；
 - **Chrome 浏览器双模实机验收**: 本地生产容器平滑部署并通过 Google Chrome 实机拍摄完成纯白与全黑双模验收。
+
+### 组代理与协议过滤架构升级 (2026-11-03)
+- **组级代理穿透 (GroupProxyDialer)**: `GroupConfig` 扩展 `proxy` 字段。通过 Mihomo `adapter.WithDialerForAPI(dialer)` 原生接口注入，支持 HTTP CONNECT 隧道与 SOCKS5 代理拨号，实现单组节点的连通测活、带宽测速与订阅拉取流量 100% 穿透前置代理；
+- **单组协议过滤拦截**: `GroupConfig` 扩展 `filter-protocols` 字段，默认过滤排除 `["http"]` 协议。在节点入库解析（`proxy/proxies.go`）、分发质检（`check/check.go`）与结果落盘（`save/save.go`）全链路拦截，直接排除明文 HTTP 废节点；
+- **节点质检分析报告 (Node Quality Analytics)**: 完整对接 `/api/analysis-report` 与 `output/stats/subs-analysis.yaml`，激活全景执行摘要、4维质检指标（探测总数、可用总数、存活率、流量耗时）、16 国地区分布进度条、协议构成分布与订阅源优劣排行榜；
+- **客户端订阅直链无感鉴权**: `authMiddleware` 支持从 URL Query（`?token=xxx` 与 `?api_key=xxx`）提取凭据，保障客户端复制直链直接拉取带有完整 126 个策略组分流规则的配置。
