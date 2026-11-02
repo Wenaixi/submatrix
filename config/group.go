@@ -19,6 +19,8 @@ type GroupConfig struct {
 	OverwriteURL       string   `json:"overwrite_url" yaml:"overwrite-url"`
 	Timeout            int      `json:"timeout" yaml:"timeout"`
 	URLs               []string `json:"urls" yaml:"urls"`
+	Proxy              string   `json:"proxy" yaml:"proxy"`
+	FilterProtocols    []string `json:"filter_protocols" yaml:"filter-protocols"`
 }
 
 // ResolvedGroupConfig 级联继承全局配置后的最终可执行组配置
@@ -38,6 +40,19 @@ type ResolvedGroupConfig struct {
 	OverwriteURL       string
 	Timeout            int
 	URLs               []string
+	Proxy              string
+	FilterProtocols    []string
+}
+
+// MatchesProtocol 检查指定协议是否属于本组配置过滤排除的协议
+func (r ResolvedGroupConfig) MatchesProtocol(protocol string) bool {
+	proto := strings.ToLower(strings.TrimSpace(protocol))
+	for _, fp := range r.FilterProtocols {
+		if strings.ToLower(strings.TrimSpace(fp)) == proto {
+			return true
+		}
+	}
+	return false
 }
 
 // ResolveGroup 将单组配置与全局配置级联合并
@@ -46,6 +61,12 @@ func ResolveGroup(g GroupConfig, global Config) ResolvedGroupConfig {
 	if g.Enabled != nil {
 		enabled = *g.Enabled
 	}
+	proxy := strings.TrimSpace(g.Proxy)
+	filterProtocols := []string{"http"} // 默认过滤 http 协议
+	if g.FilterProtocols != nil {
+		filterProtocols = g.FilterProtocols
+	}
+
 	res := ResolvedGroupConfig{
 		Name:               g.Name,
 		Enabled:            enabled,
@@ -62,6 +83,8 @@ func ResolveGroup(g GroupConfig, global Config) ResolvedGroupConfig {
 		OverwriteURL:       g.OverwriteURL,
 		Timeout:            global.Timeout,
 		URLs:               g.URLs,
+		Proxy:              proxy,
+		FilterProtocols:    filterProtocols,
 	}
 
 	if res.DisplayName == "" {
@@ -118,6 +141,8 @@ func ResolveAllGroups(global Config) []ResolvedGroupConfig {
 				AppendOriginalName: global.AppendOriginalName,
 				OverwriteURL:       "",
 				URLs:               cleanUrls,
+				Proxy:              "",
+				FilterProtocols:    []string{"http"},
 			},
 		}
 	}
