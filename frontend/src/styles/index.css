@@ -210,6 +210,6 @@ textarea {
   align-items: center;
   gap: 8px;
   z-index: 100000;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  /* 纯粹扁平 0 阴影 */
   transition: opacity 0.2s ease;
 }

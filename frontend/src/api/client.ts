@@ -80,11 +80,31 @@ export interface GroupItem {
   OverwriteURL?: string;
   Timeout?: number;
   URLs?: string[];
-  // 容错兼容小写
+  // 健全容错兼容字段
   name?: string;
   displayName?: string;
+  display_name?: string;
   tag?: string;
   enabled?: boolean;
+  check_alive?: boolean;
+  checkAlive?: boolean;
+  check_speed?: boolean;
+  checkSpeed?: boolean;
+  min_speed?: number;
+  minSpeed?: number;
+  media_check?: boolean;
+  mediaCheck?: boolean;
+  tag_ip_type?: boolean;
+  tagIPType?: boolean;
+  rename_node?: boolean;
+  renameNode?: boolean;
+  append_original_name?: boolean;
+  appendOriginalName?: boolean;
+  drop_on_fail?: boolean;
+  dropOnFail?: boolean;
+  overwrite_url?: string;
+  overwriteUrl?: string;
+  timeout?: number;
   urls?: string[];
 }
 

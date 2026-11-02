@@ -1,5 +1,5 @@
-import React from 'react';
-import { Copy, ExternalLink, Check } from 'lucide-react';
+import React, { useState } from 'react';
+import { Copy, Eye, X } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 interface SubscriptionsViewProps {
@@ -9,6 +9,7 @@ interface SubscriptionsViewProps {
 
 export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({ listenPort, apiKey }) => {
   const { showToast } = useToast();
+  const [previewContent, setPreviewContent] = useState<{ title: string; text: string } | null>(null);
   const host = location.hostname;
   const protocol = location.protocol;
   const portStr = listenPort ? (listenPort.startsWith(":") ? listenPort : ":" + listenPort) : (location.port ? ":" + location.port : "");
@@ -43,7 +44,7 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({ listenPort
 
   const copy = (url: string) => {
     if (navigator.clipboard) {
-      navigator.clipboard.writeText(url).then(() => showToast("订阅地址已复制至剪贴板"));
+      navigator.clipboard.writeText(url).then(() => showToast("订阅地址已复制"));
     } else {
       const inp = document.createElement("input");
       inp.value = url;
@@ -51,7 +52,18 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({ listenPort
       inp.select();
       document.execCommand("copy");
       inp.remove();
-      showToast("订阅地址已复制至剪贴板");
+      showToast("订阅地址已复制");
+    }
+  };
+
+  const handlePreview = async (name: string, url: string) => {
+    setPreviewContent({ title: name, text: "正在加载订阅内容..." });
+    try {
+      const res = await fetch(url);
+      const text = await res.text();
+      setPreviewContent({ title: name, text });
+    } catch (e: any) {
+      setPreviewContent({ title: name, text: `预览加载失败: ${e.message}` });
     }
   };
 
@@ -63,10 +75,10 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({ listenPort
         border: '1px solid var(--border)'
       }}>
         <h2 style={{ fontSize: '18px', fontWeight: 500, color: 'var(--text-primary)' }}>
-          全量订阅中心 (Subscriptions)
+          订阅链接 (Subscriptions)
         </h2>
         <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-          支持各大客户端协议直链，内置自动鉴权防盗链机制
+          支持各大客户端协议直链，内置自动鉴权机制。
         </p>
       </div>
 
@@ -107,16 +119,65 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({ listenPort
                 <button onClick={() => copy(fullUrl)} className="btn-primary" style={{ flex: 1 }}>
                   <Copy size={13} /> 复制直链
                 </button>
-                <a href={fullUrl} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}>
-                  <button className="btn-ghost">
-                    <ExternalLink size={13} /> 预览
-                  </button>
-                </a>
+                <button onClick={() => handlePreview(item.name, fullUrl)} className="btn-ghost">
+                  <Eye size={13} /> 预览
+                </button>
               </div>
             </div>
           );
         })}
       </div>
+
+      {/* 内嵌式预览浮层，彻底替代 window.open */}
+      {previewContent && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, width: '100vw', height: '100vh',
+          background: 'rgba(0,0,0,0.4)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 100000,
+          padding: '24px'
+        }}>
+          <div style={{
+            width: '100%',
+            maxWidth: '900px',
+            maxHeight: '85vh',
+            background: 'var(--surface-0)',
+            border: '1px solid var(--border-black)',
+            display: 'flex',
+            flexDirection: 'column'
+          }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '12px 16px',
+              borderBottom: '1px solid var(--border)',
+              background: 'var(--surface-1)'
+            }}>
+              <span style={{ fontSize: '14px', fontWeight: 500, fontFamily: 'var(--font-mono)' }}>{previewContent.title}</span>
+              <button onClick={() => setPreviewContent(null)} className="btn-ghost" style={{ padding: '4px' }}>
+                <X size={16} />
+              </button>
+            </div>
+            <pre style={{
+              flex: 1,
+              overflowY: 'auto',
+              padding: '16px',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '12px',
+              lineHeight: '1.6',
+              background: 'var(--surface-1)',
+              color: 'var(--text-primary)',
+              margin: 0
+            }}>
+              {previewContent.text}
+            </pre>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

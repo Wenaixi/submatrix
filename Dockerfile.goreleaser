@@ -20,6 +20,6 @@ LABEL org.opencontainers.image.title="subs-check-pro" \
 ARG TARGETPLATFORM
 COPY --chmod=755 ${TARGETPLATFORM}/subs-check-pro /app/subs-check-pro
 
-EXPOSE 8199 8299
+EXPOSE 8199
 
 CMD ["/app/subs-check-pro"]
