@@ -296,33 +296,94 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
                 </div>
               </div>
 
-              {/* 阶梯 4：高级过滤与重写折叠区 */}
+              {/* 阶梯 4：高级过滤、组代理与链接重写 */}
               <details style={{ border: '1px solid var(--border)', background: 'var(--surface-1)' }}>
                 <summary style={{ padding: '8px 12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', userSelect: 'none' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <Sliders size={13} color="var(--text-secondary)" />
-                    <span style={{ fontSize: '13px', color: 'var(--text-primary)' }}>高级过滤与链接重写</span>
+                    <span style={{ fontSize: '13px', color: 'var(--text-primary)' }}>高级过滤、组代理与链接重写</span>
                   </div>
                   <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>点击展开 / 收起</span>
                 </summary>
-                <div style={{ padding: '12px', display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '12px', background: 'var(--surface-0)' }}>
-                  <div>
-                    <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>最低速度限制 (KB/s)</label>
-                    <input
-                      type="number"
-                      placeholder="0 表示不过滤"
-                      value={minSpeed || ''}
-                      onChange={(e) => updateGroup(idx, { MinSpeed: parseInt(e.target.value) || 0, min_speed: parseInt(e.target.value) || 0 })}
-                    />
+                <div style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: '14px', background: 'var(--surface-0)' }}>
+                  {/* 第 1 行：门槛速度与重写链接 */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '12px' }}>
+                    <div>
+                      <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>最低速度限制 (KB/s)</label>
+                      <input
+                        type="number"
+                        placeholder="0 表示不过滤"
+                        value={minSpeed || ''}
+                        onChange={(e) => updateGroup(idx, { MinSpeed: parseInt(e.target.value) || 0, min_speed: parseInt(e.target.value) || 0 })}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>外部重写链接 (Overwrite URL)</label>
+                      <input
+                        type="text"
+                        placeholder="留空默认使用内部聚合直链"
+                        value={overwriteURL}
+                        onChange={(e) => updateGroup(idx, { OverwriteURL: e.target.value.trim(), overwrite_url: e.target.value.trim() })}
+                      />
+                    </div>
                   </div>
+
+                  {/* 第 2 行：组专用前置代理 */}
                   <div>
-                    <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>外部重写链接 (Overwrite URL)</label>
+                    <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>
+                      组专用前置代理 (Group Proxy，选填)
+                    </label>
                     <input
                       type="text"
-                      placeholder="留空默认使用内部聚合直链"
-                      value={overwriteURL}
-                      onChange={(e) => updateGroup(idx, { OverwriteURL: e.target.value.trim(), overwrite_url: e.target.value.trim() })}
+                      placeholder="http://127.0.0.1:10808 或 socks5://127.0.0.1:10808"
+                      value={g.Proxy || g.proxy || ''}
+                      onChange={(e) => updateGroup(idx, { Proxy: e.target.value.trim(), proxy: e.target.value.trim() })}
                     />
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '3px' }}>
+                      配置后，此组节点的所有连通测活、带宽测速与订阅拉取流量均穿透该代理建立连接。
+                    </div>
+                  </div>
+
+                  {/* 第 3 行：协议过滤选择器（默认过滤 HTTP） */}
+                  <div>
+                    <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
+                      协议过滤配置 (Protocol Filter，点击可切换排除状态)
+                    </label>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      {['http', 'socks5', 'vless', 'ss', 'anytls', 'trojan', 'ssr', 'hysteria2', 'tuic'].map((proto) => {
+                        const filterList = g.FilterProtocols || g.filter_protocols || ['http'];
+                        const isFiltered = filterList.map(p => p.toLowerCase()).includes(proto.toLowerCase());
+                        return (
+                          <button
+                            key={proto}
+                            type="button"
+                            onClick={() => {
+                              const cur = filterList.map(p => p.toLowerCase());
+                              const next = isFiltered
+                                ? cur.filter(p => p !== proto.toLowerCase())
+                                : [...cur, proto.toLowerCase()];
+                              updateGroup(idx, { FilterProtocols: next, filter_protocols: next });
+                            }}
+                            style={{
+                              padding: '3px 8px',
+                              fontSize: '11px',
+                              cursor: 'pointer',
+                              fontFamily: 'var(--font-mono)',
+                              border: isFiltered ? '1px solid var(--border-black)' : '1px solid var(--border)',
+                              background: isFiltered ? 'var(--btn-primary-bg)' : 'var(--surface-1)',
+                              color: isFiltered ? 'var(--btn-primary-fg)' : 'var(--text-secondary)',
+                              fontWeight: isFiltered ? 500 : 400
+                            }}
+                            title={isFiltered ? `已排除 ${proto.toUpperCase()} 协议节点` : `点击排除 ${proto.toUpperCase()} 协议节点`}
+                          >
+                            {proto.toUpperCase()} {isFiltered ? '(已过滤)' : ''}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                      已过滤协议的节点在拉取时会被直接丢弃（默认排除明文 HTTP 废节点），绝不进入后续测活与订阅导出。
+                    </div>
                   </div>
                 </div>
               </details>
