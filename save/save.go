@@ -467,6 +467,11 @@ func SaveGroupConfig(grp config.ResolvedGroupConfig, results []check.Result) {
 		if r.Proxy == nil {
 			continue
 		}
+		// 协议过滤防线：确保被当前组过滤排除的协议绝不落盘到组订阅中
+		typ := strings.ToLower(fmt.Sprintf("%v", r.Proxy["type"]))
+		if grp.MatchesProtocol(typ) {
+			continue
+		}
 		proxiesList = append(proxiesList, r.Proxy)
 	}
 
