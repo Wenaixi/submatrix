@@ -80,6 +80,8 @@ export interface GroupItem {
   OverwriteURL?: string;
   Timeout?: number;
   URLs?: string[];
+  Proxy?: string;
+  FilterProtocols?: string[];
   // 健全容错兼容字段
   name?: string;
   displayName?: string;
@@ -106,6 +108,9 @@ export interface GroupItem {
   overwriteUrl?: string;
   timeout?: number;
   urls?: string[];
+  proxy?: string;
+  filter_protocols?: string[];
+  filterProtocols?: string[];
 }
 
 export interface GroupsResponse {
@@ -147,17 +152,52 @@ export interface FilesResponse {
 }
 export const getFilesData = () => apiRequest<FilesResponse>("/api/files-data");
 
-// 5. 节点分析
-export interface AnalysisReportResponse {
-  total: number;
-  available: number;
-  nodes?: any[];
-  countries?: Record<string, number>;
+// 5. 节点质检分析报告全量结构
+export interface CheckInfo {
+  check_time?: string;
+  check_duration?: string;
+  check_duration_raw?: number;
+  check_count?: string;
+  check_count_raw?: number;
+  check_traffic_total?: string;
+  check_traffic_total_raw?: number;
+  check_traffic_download_raw?: number;
+  check_traffic_upload_raw?: number;
+  total_subs_size?: string;
+  check_min_speed?: number;
+}
+
+export interface SubRankingItem {
+  url: string;
+  avg_speed?: string;
+  file_size?: string;
+  traffic?: string;
+  stats?: {
+    total: number;
+    success: number;
+    rate: string;
+  };
+  locations?: Record<string, number>;
   protocols?: Record<string, number>;
-  speed_tiers?: Record<string, number>;
-  avg_speed?: number;
-  max_speed?: number;
-  generated_at?: string;
+  top_locations?: string[];
+}
+
+export interface ReportData {
+  summary?: string;
+  check_info?: CheckInfo;
+  global_analysis?: {
+    alive_count?: number;
+    geography_distribution?: Record<string, number>;
+    protocol_distribution?: Record<string, number>;
+    quality_metrics?: Record<string, any>;
+  };
+  subs_ranking?: SubRankingItem[];
+  subs_ranking_bad?: SubRankingItem[];
+}
+
+export interface AnalysisReportResponse {
+  report?: string;
+  report_data?: ReportData;
 }
 export const getAnalysisReport = () => apiRequest<AnalysisReportResponse>("/api/analysis-report");
 
