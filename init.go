@@ -59,7 +59,7 @@ func init() {
 		fmt.Println("\033[32m重启成功\033[0m")
 	}
 	fmt.Println("==================== SubMatrix ====================")
-	fmt.Println("⚡ SubMatrix 高性能订阅拓扑矩阵与节点筛选工具")
+	fmt.Println("SubMatrix 订阅分组与节点检测管理系统")
 	fmt.Println("1. 项目地址：https://github.com/Wenaixi/submatrix")
 	fmt.Println("2. 官方镜像：docker.io/wenxiloveyou/submatrix:latest")
 	fmt.Println("3. 统一端口：:8199 (支持WebUI管理与Sub-Store统一反代)")

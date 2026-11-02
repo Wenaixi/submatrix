@@ -316,8 +316,11 @@ func (app *App) pageAuthMiddleware() gin.HandlerFunc {
 		if err == nil {
 			apiKey = cookie
 		} else {
-			// 从 Query 参数读取凭证
+			// 从 Query 参数读取凭证 (兼容 api_key 与 token)
 			apiKey = c.Query("api_key")
+			if apiKey == "" {
+				apiKey = c.Query("token")
+			}
 		}
 
 		// 对比密钥

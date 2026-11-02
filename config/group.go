@@ -1,22 +1,24 @@
 package config
 
+import "strings"
+
 // GroupConfig 代表用户在 config.yaml 的 groups 节点下定义的单组配置
 type GroupConfig struct {
-	Name               string   `yaml:"name"`
-	Enabled            *bool    `yaml:"enabled"`
-	DisplayName        string   `yaml:"display-name"`
-	Tag                string   `yaml:"tag"`
-	CheckAlive         *bool    `yaml:"check-alive"`
-	CheckSpeed         *bool    `yaml:"check-speed"`
-	MinSpeed           *int     `yaml:"min-speed"`
-	MediaCheck         *bool    `yaml:"media-check"`
-	TagIPType          *bool    `yaml:"tag-ip-type"`
-	RenameNode         *bool    `yaml:"rename-node"`
-	AppendOriginalName *bool    `yaml:"append-original-name"`
-	DropOnFail         *bool    `yaml:"drop-on-fail"`
-	OverwriteURL       string   `yaml:"overwrite-url"`
-	Timeout            int      `yaml:"timeout"`
-	URLs               []string `yaml:"urls"`
+	Name               string   `json:"name" yaml:"name"`
+	Enabled            *bool    `json:"enabled" yaml:"enabled"`
+	DisplayName        string   `json:"display_name" yaml:"display-name"`
+	Tag                string   `json:"tag" yaml:"tag"`
+	CheckAlive         *bool    `json:"check_alive" yaml:"check-alive"`
+	CheckSpeed         *bool    `json:"check_speed" yaml:"check-speed"`
+	MinSpeed           *int     `json:"min_speed" yaml:"min-speed"`
+	MediaCheck         *bool    `json:"media_check" yaml:"media-check"`
+	TagIPType          *bool    `json:"tag_ip_type" yaml:"tag-ip-type"`
+	RenameNode         *bool    `json:"rename_node" yaml:"rename-node"`
+	AppendOriginalName *bool    `json:"append_original_name" yaml:"append-original-name"`
+	DropOnFail         *bool    `json:"drop_on_fail" yaml:"drop-on-fail"`
+	OverwriteURL       string   `json:"overwrite_url" yaml:"overwrite-url"`
+	Timeout            int      `json:"timeout" yaml:"timeout"`
+	URLs               []string `json:"urls" yaml:"urls"`
 }
 
 // ResolvedGroupConfig 级联继承全局配置后的最终可执行组配置
@@ -93,31 +95,54 @@ func ResolveGroup(g GroupConfig, global Config) ResolvedGroupConfig {
 	if g.Timeout > 0 {
 		res.Timeout = g.Timeout
 	}
-
 	return res
 }
 
-// ResolveAllGroups 解析所有组；若未显式配置 groups 则将全局 sub-urls 映射为默认组向后兼容
-func ResolveAllGroups(cfg Config) []ResolvedGroupConfig {
-	if len(cfg.Groups) > 0 {
-		resolved := make([]ResolvedGroupConfig, 0, len(cfg.Groups))
-		for _, g := range cfg.Groups {
-			if g.Name == "" {
-				continue
-			}
-			resolved = append(resolved, ResolveGroup(g, cfg))
-		}
-		if len(resolved) > 0 {
-			return resolved
+// ResolveAllGroups 解析全局配置并导出所有生效的组配置
+func ResolveAllGroups(global Config) []ResolvedGroupConfig {
+	if len(global.Groups) == 0 {
+		cleanUrls := filterCleanUrls(global.SubUrls)
+		return []ResolvedGroupConfig{
+			{
+				Name:               "default",
+				DisplayName:        "默认组",
+				Tag:                "",
+				CheckAlive:         true,
+				CheckSpeed:         true,
+				MinSpeed:           global.MinSpeed,
+				Timeout:            resolveTimeout(global.Timeout),
+				DropOnFail:         true,
+				MediaCheck:         global.MediaCheck,
+				TagIPType:          global.TagIPType,
+				RenameNode:         global.RenameNode,
+				AppendOriginalName: global.AppendOriginalName,
+				OverwriteURL:       "",
+				URLs:               cleanUrls,
+			},
 		}
 	}
 
-	// 向后兼容模式
-	return []ResolvedGroupConfig{
-		ResolveGroup(GroupConfig{
-			Name:        "default",
-			DisplayName: "默认订阅组",
-			URLs:        cfg.SubUrls,
-		}, cfg),
+	res := make([]ResolvedGroupConfig, 0, len(global.Groups))
+	for _, g := range global.Groups {
+		res = append(res, ResolveGroup(g, global))
 	}
+	return res
+}
+
+func resolveTimeout(t int) int {
+	if t <= 0 {
+		return 5000
+	}
+	return t
+}
+
+func filterCleanUrls(raw []string) []string {
+	out := make([]string, 0, len(raw))
+	for _, u := range raw {
+		s := strings.TrimSpace(u)
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
