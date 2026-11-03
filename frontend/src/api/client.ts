@@ -82,6 +82,7 @@ export interface GroupItem {
   URLs?: string[];
   Proxy?: string;
   FilterProtocols?: string[];
+  RulePreset?: string;
   // 健全容错兼容字段
   name?: string;
   displayName?: string;
@@ -111,6 +112,8 @@ export interface GroupItem {
   proxy?: string;
   filter_protocols?: string[];
   filterProtocols?: string[];
+  rule_preset?: string;
+  rulePreset?: string;
 }
 
 export interface GroupsResponse {
