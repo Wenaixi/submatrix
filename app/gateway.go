@@ -91,29 +91,20 @@ func RegisterGroupRoutes(router *gin.Engine, outputPath string, authMiddleware g
 			return
 		}
 
-		// 智能自适应网关：若请求的是 mihomo.yaml 完整规则配置，动态将模板中的直链 Host 与 Token 替换为客户端真实访问源
+		// 智能自适应网关：若请求的是 mihomo.yaml 完整规则配置，动态将模板中的直链 BaseURL 与 Token 替换为官方公网域名或客户端真实访问源
 		if relPath == "mihomo.yaml" {
 			data, err := os.ReadFile(targetFile)
 			if err == nil {
-				host := c.Request.Host
-				if host == "" {
-					host = "127.0.0.1:8199"
-				}
+				baseURL := GetCanonicalBaseURL(c)
 				token := c.Query("token")
 				if token == "" {
 					token = c.Query("api_key")
 				}
-				proto := "http"
-				if c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https" {
-					proto = "https"
-				}
 
 				content := string(data)
-				// 动态替换 Provider 直链的主机与鉴权 Token
-				content = strings.ReplaceAll(content, "127.0.0.1:8199", host)
-				if proto == "https" {
-					content = strings.ReplaceAll(content, "http://"+host, "https://"+host)
-				}
+				// 动态替换 Provider 直链的基准网络地址与鉴权 Token
+				content = strings.ReplaceAll(content, "http://127.0.0.1:8199", baseURL)
+				content = strings.ReplaceAll(content, "https://127.0.0.1:8199", baseURL)
 				if token != "" && token != "wenxi-admin" {
 					content = strings.ReplaceAll(content, "token=wenxi-admin", "token="+token)
 				}
@@ -126,4 +117,23 @@ func RegisterGroupRoutes(router *gin.Engine, outputPath string, authMiddleware g
 
 		c.File(targetFile)
 	})
+}
+
+// GetCanonicalBaseURL 计算当前请求的权威基准 URL（优先 public-url，次之 X-Forwarded 反代头，兜底 Host）
+func GetCanonicalBaseURL(c *gin.Context) string {
+	if config.GlobalConfig != nil && strings.TrimSpace(config.GlobalConfig.PublicURL) != "" {
+		return strings.TrimRight(strings.TrimSpace(config.GlobalConfig.PublicURL), "/")
+	}
+	proto := "http"
+	if c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https" {
+		proto = "https"
+	}
+	host := c.GetHeader("X-Forwarded-Host")
+	if host == "" {
+		host = c.Request.Host
+	}
+	if host == "" {
+		host = "127.0.0.1:8199"
+	}
+	return proto + "://" + host
 }

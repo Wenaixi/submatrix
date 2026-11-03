@@ -10,21 +10,19 @@ interface SubscriptionsViewProps {
 export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({ listenPort, apiKey }) => {
   const { showToast } = useToast();
   const [previewContent, setPreviewContent] = useState<{ title: string; text: string } | null>(null);
-  // 优先默认采用主人的官方公网域名
-  const [selectedHostMode, setSelectedHostMode] = useState<'public' | 'lan' | 'local'>('public');
+  // 纯动态自适应当前访问源，无任何硬编码
+  const [customOrigin, setCustomOrigin] = useState<string>(() => {
+    return localStorage.getItem('submatrix_custom_origin') || '';
+  });
 
   const tokenQuery = apiKey ? `?token=${encodeURIComponent(apiKey)}` : "";
-  const publicOrigin = "https://sub-s.wenxi.dev";
-  const lanOrigin = "http://192.168.1.141:8199";
-  const localOrigin = "http://127.0.0.1:8199";
 
+  // 基础源计算：若用户填写了自定义外部域名则使用之，否则自动采用当前浏览器打开的真实源 location.origin
   const getBaseOrigin = () => {
-    switch (selectedHostMode) {
-      case 'public': return publicOrigin;
-      case 'lan': return lanOrigin;
-      case 'local': return localOrigin;
-      default: return publicOrigin;
+    if (customOrigin.trim()) {
+      return customOrigin.trim().replace(/\/+$/, '');
     }
+    return location.origin;
   };
 
   const subItems = [
@@ -105,60 +103,44 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({ listenPort
           </p>
         </div>
 
-        {/* 客户端使用场景切换：官方公网域名 vs 手机局域网 vs 本机电脑 */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>服务域名源：</span>
-          <button
-            type="button"
-            onClick={() => setSelectedHostMode('public')}
-            style={{
-              padding: '5px 10px',
-              fontSize: '12px',
-              cursor: 'pointer',
-              border: selectedHostMode === 'public' ? '1px solid var(--border-black)' : '1px solid var(--border)',
-              background: selectedHostMode === 'public' ? 'var(--btn-primary-bg)' : 'var(--surface-1)',
-              color: selectedHostMode === 'public' ? 'var(--btn-primary-fg)' : 'var(--text-secondary)',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px'
-            }}
-          >
-            ● 官方公网域名 (sub-s.wenxi.dev)
-          </button>
-          <button
-            type="button"
-            onClick={() => setSelectedHostMode('lan')}
-            style={{
-              padding: '5px 10px',
-              fontSize: '12px',
-              cursor: 'pointer',
-              border: selectedHostMode === 'lan' ? '1px solid var(--border-black)' : '1px solid var(--border)',
-              background: selectedHostMode === 'lan' ? 'var(--btn-primary-bg)' : 'var(--surface-1)',
-              color: selectedHostMode === 'lan' ? 'var(--btn-primary-fg)' : 'var(--text-secondary)',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px'
-            }}
-          >
-            <Smartphone size={13} /> 手机/外部设备 (192.168.1.141)
-          </button>
-          <button
-            type="button"
-            onClick={() => setSelectedHostMode('local')}
-            style={{
-              padding: '5px 10px',
-              fontSize: '12px',
-              cursor: 'pointer',
-              border: selectedHostMode === 'local' ? '1px solid var(--border-black)' : '1px solid var(--border)',
-              background: selectedHostMode === 'local' ? 'var(--btn-primary-bg)' : 'var(--surface-1)',
-              color: selectedHostMode === 'local' ? 'var(--btn-primary-fg)' : 'var(--text-secondary)',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px'
-            }}
-          >
-            <Monitor size={13} /> 本机调试 (127.0.0.1)
-          </button>
+        {/* 动态域名与自定义外部源 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>导出域名源：</span>
+            <input
+              type="text"
+              placeholder={`默认跟随当前网址 (${location.origin})`}
+              value={customOrigin}
+              onChange={(e) => {
+                const val = e.target.value;
+                setCustomOrigin(val);
+                localStorage.setItem('submatrix_custom_origin', val);
+              }}
+              style={{
+                padding: '4px 8px',
+                fontSize: '12px',
+                width: '240px',
+                fontFamily: 'var(--font-mono)'
+              }}
+            />
+            {customOrigin && (
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomOrigin('');
+                  localStorage.removeItem('submatrix_custom_origin');
+                  showToast('已恢复自动跟随当前网页网址');
+                }}
+                className="btn-ghost"
+                style={{ padding: '4px 6px', fontSize: '11px' }}
+              >
+                重置
+              </button>
+            )}
+          </div>
+          <span className="badge" style={{ fontSize: '11px' }}>
+            {customOrigin ? '自定义域名' : '当前自适应: ' + location.origin}
+          </span>
         </div>
       </div>
 
