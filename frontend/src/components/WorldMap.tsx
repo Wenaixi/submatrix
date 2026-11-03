@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
+import worldLandRings from '../assets/world-land.json';
 
-// 国家中心坐标 [lon, lat]
+// 国家中心经纬度坐标字典 [lon, lat]
 const GEO_COUNTRY_COORDS: Record<string, [number, number]> = {
   CN: [104.20, 35.86], HK: [114.17, 22.32], TW: [120.96, 23.70],
   JP: [138.25, 36.20], KR: [127.77, 35.91], MN: [103.85, 46.86], MO: [113.54, 22.20],
@@ -19,12 +20,11 @@ const GEO_COUNTRY_COORDS: Record<string, [number, number]> = {
   CM: [12.35, 7.36]
 };
 
-// 大区颜色（黑白高对比与夜景璀璨双模兼容）
-const REGION_COLORS: Record<string, string> = {
-  US: '#3b82f6', NL: '#10b981', SG: '#f59e0b', DE: '#ec4899',
-  HK: '#8b5cf6', JP: '#ef4444', GB: '#06b6d4', FR: '#6366f1',
-  DEFAULT: '#94a3b8'
-};
+// 预先过滤剔除南极极地冰盖（仅保留宜居大陆板块）
+const ACTIVE_LAND_RINGS = (worldLandRings as number[][][]).filter((ring: number[][]) => {
+  const avgLat = ring.reduce((sum, p) => sum + p[1], 0) / ring.length;
+  return avgLat > -58;
+});
 
 interface WorldMapProps {
   distribution: Record<string, number>;
@@ -44,15 +44,14 @@ export const WorldMap: React.FC<WorldMapProps> = ({ distribution }) => {
     if (!ctx) return;
 
     let animId: number;
-    let t0 = performance.now();
     const dpr = window.devicePixelRatio || 1;
 
-    // 起点：默认中国沿海/香港核心 [lon: 114.17, lat: 22.32]
+    // 调度中心：中国/香港沿海核心
     const origin = { lon: 114.17, lat: 22.32 };
 
     const getDimensions = () => {
-      const W = container.clientWidth || 900;
-      const H = 320;
+      const W = container.clientWidth || 960;
+      const H = 380;
       return { W, H };
     };
 
@@ -73,33 +72,28 @@ export const WorldMap: React.FC<WorldMapProps> = ({ distribution }) => {
     const ro = new ResizeObserver(() => resize());
     ro.observe(container);
 
-    // 墨卡托/经纬度平面映射函数
+    // 标准国际墨卡托等距经纬度投影
     const proj = (lon: number, lat: number) => {
-      const mx = 12, my = 12;
-      const centerLon = origin.lon + 35;
-      let dlon = lon - centerLon;
-      while (dlon > 180) dlon -= 360;
-      while (dlon < -180) dlon += 360;
-      const x = mx + (dlon + 180) / 360 * (W - 2 * mx);
-      const y = my + (85 - lat) / 145 * (H - 2 * my);
+      const mx = 24, my = 24;
+      const x = mx + ((lon + 180) / 360) * (W - 2 * mx);
+      const y = my + ((85 - lat) / 143) * (H - 2 * my);
       return [x, y];
     };
 
-    // 提取有效节点目标数据
+    // 目标国家数据与最大值计算
     const entries = Object.entries(distribution || {}).filter(([k]) => GEO_COUNTRY_COORDS[k]);
     const maxCount = Math.max(...entries.map(([, v]) => v), 1);
 
-    // 贝塞尔航线计算
+    // 航线计算
     const [ox, oy] = proj(origin.lon, origin.lat);
     const arcs = entries.map(([code, count], idx) => {
       const [lon, lat] = GEO_COUNTRY_COORDS[code];
       const [dx, dy] = proj(lon, lat);
       const ratio = count / maxCount;
       const dist = Math.hypot(dx - ox, dy - oy);
-      const lift = Math.min(dist * 0.38, H * 0.42);
+      const lift = Math.min(dist * 0.35, H * 0.4);
       const cpx = (ox + dx) / 2;
       const cpy = (oy + dy) / 2 - lift;
-      const color = REGION_COLORS[code] || REGION_COLORS.DEFAULT;
       return {
         code,
         count,
@@ -107,12 +101,11 @@ export const WorldMap: React.FC<WorldMapProps> = ({ distribution }) => {
         ox, oy,
         cpx, cpy,
         dx, dy,
-        color,
-        period: 2400 + idx * 180
+        period: 2600 + idx * 160
       };
     });
 
-    // 鼠标移动悬停检测
+    // 鼠标悬停交互
     const handleMouseMove = (e: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
       const mx = e.clientX - rect.left;
@@ -141,60 +134,86 @@ export const WorldMap: React.FC<WorldMapProps> = ({ distribution }) => {
     canvas.addEventListener('mousemove', handleMouseMove);
     canvas.addEventListener('mouseleave', handleMouseLeave);
 
-    // 绘制点阵世界底图（高科技雷达感）
-    const drawDotGrid = () => {
-      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-      const gridDotColor = isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.08)';
-      const activeDotColor = isDark ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.35)';
+    // 绘制真实各大洲版图
+    const drawContinents = (isDark: boolean) => {
+      ctx.save();
+      ctx.beginPath();
 
-      const destSet = new Set(entries.map(([c]) => c));
+      for (const ring of ACTIVE_LAND_RINGS) {
+        if (ring.length < 3) continue;
+        let lastX = 0;
+        for (let i = 0; i < ring.length; i++) {
+          const [lon, lat] = ring[i];
+          const [px, py] = proj(lon, lat);
 
-      // 渲染世界各国点阵
-      for (const [code, [lon, lat]] of Object.entries(GEO_COUNTRY_COORDS)) {
-        let d = lon - origin.lon;
-        while (d > 180) d -= 360;
-        while (d < -180) d += 360;
-        const [x, y] = proj(origin.lon + d, lat);
-
-        ctx.beginPath();
-        const isTarget = destSet.has(code);
-        ctx.arc(x, y, isTarget ? 2 : 1, 0, Math.PI * 2);
-        ctx.fillStyle = isTarget ? activeDotColor : gridDotColor;
-        ctx.fill();
+          if (i === 0) {
+            ctx.moveTo(px, py);
+          } else {
+            // 防跨日界线撕裂，平滑断笔
+            if (Math.abs(px - lastX) > W * 0.45) {
+              ctx.moveTo(px, py);
+            } else {
+              ctx.lineTo(px, py);
+            }
+          }
+          lastX = px;
+        }
       }
 
-      // 绘制经纬网格辅助虚线
-      ctx.strokeStyle = isDark ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.03)';
+      // 陆地填充与海岸线高精度描边
+      ctx.fillStyle = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)';
+      ctx.fill();
+      ctx.strokeStyle = isDark ? 'rgba(255, 255, 255, 0.45)' : 'rgba(0, 0, 0, 0.35)';
+      ctx.lineWidth = 0.9;
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+
+      ctx.restore();
+    };
+
+    // 绘制经纬网格线
+    const drawGrid = (isDark: boolean) => {
+      ctx.strokeStyle = isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.04)';
       ctx.lineWidth = 1;
       ctx.setLineDash([3, 6]);
-      for (let y = 40; y < H; y += 50) {
+
+      for (let y = 60; y < H; y += 70) {
         ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(W, y);
+        ctx.moveTo(24, y);
+        ctx.lineTo(W - 24, y);
+        ctx.stroke();
+      }
+      for (let x = 80; x < W; x += 120) {
+        ctx.beginPath();
+        ctx.moveTo(x, 24);
+        ctx.lineTo(x, H - 24);
         ctx.stroke();
       }
       ctx.setLineDash([]);
     };
 
-    // 主动画循环
+    // 动画主循环
     const render = (time: number) => {
       const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
       ctx.clearRect(0, 0, W, H);
 
-      // 1. 底图点阵
-      drawDotGrid();
+      // 1. 经纬线
+      drawGrid(isDark);
 
-      // 2. 绘制静态弧线与动态粒子
+      // 2. 真实地球大陆版图
+      drawContinents(isDark);
+
+      // 3. 动态贝塞尔航线与光点
       for (const arc of arcs) {
-        // 静态航线
+        // 航线弧线
         ctx.beginPath();
         ctx.moveTo(arc.ox, arc.oy);
         ctx.quadraticCurveTo(arc.cpx, arc.cpy, arc.dx, arc.dy);
-        ctx.strokeStyle = isDark ? 'rgba(255, 255, 255, 0.18)' : 'rgba(0, 0, 0, 0.12)';
+        ctx.strokeStyle = isDark ? 'rgba(255, 255, 255, 0.25)' : 'rgba(0, 0, 0, 0.18)';
         ctx.lineWidth = 1;
         ctx.stroke();
 
-        // 动态飞行光点
+        // 飞行粒子
         const progress = ((time + arc.period * 0.2) % arc.period) / arc.period;
         const m = 1 - progress;
         const px = m * m * arc.ox + 2 * m * progress * arc.cpx + progress * progress * arc.dx;
@@ -203,40 +222,43 @@ export const WorldMap: React.FC<WorldMapProps> = ({ distribution }) => {
         ctx.beginPath();
         ctx.arc(px, py, 2.5, 0, Math.PI * 2);
         ctx.fillStyle = isDark ? '#ffffff' : '#000000';
-        ctx.shadowColor = isDark ? 'rgba(255, 255, 255, 0.8)' : 'rgba(0, 0, 0, 0.5)';
+        ctx.shadowColor = isDark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.6)';
         ctx.shadowBlur = 4;
         ctx.fill();
         ctx.shadowBlur = 0;
 
-        // 目标国家圆点与脉冲光晕
+        // 目标国家圆点
         ctx.beginPath();
-        ctx.arc(arc.dx, arc.dy, 3 + arc.ratio * 2.5, 0, Math.PI * 2);
+        ctx.arc(arc.dx, arc.dy, 3.5 + arc.ratio * 2.5, 0, Math.PI * 2);
         ctx.fillStyle = isDark ? '#ffffff' : '#000000';
         ctx.fill();
 
-        // 扩散光圈
+        // 呼吸脉冲光圈
         const pulse = (time % 1600) / 1600;
         ctx.beginPath();
-        ctx.arc(arc.dx, arc.dy, (4 + arc.ratio * 2) + pulse * 10, 0, Math.PI * 2);
-        ctx.strokeStyle = isDark ? `rgba(255, 255, 255, ${0.6 * (1 - pulse)})` : `rgba(0, 0, 0, ${0.4 * (1 - pulse)})`;
-        ctx.lineWidth = 1;
+        ctx.arc(arc.dx, arc.dy, (4 + arc.ratio * 2) + pulse * 12, 0, Math.PI * 2);
+        ctx.strokeStyle = isDark
+          ? `rgba(255, 255, 255, ${0.7 * (1 - pulse)})`
+          : `rgba(0, 0, 0, ${0.5 * (1 - pulse)})`;
+        ctx.lineWidth = 1.2;
         ctx.stroke();
 
         // 国家代码标签
         ctx.font = '10px var(--font-mono)';
-        ctx.fillStyle = isDark ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.65)';
-        ctx.fillText(arc.code, arc.dx + 6, arc.dy + 3);
+        ctx.fillStyle = isDark ? 'rgba(255, 255, 255, 0.85)' : 'rgba(0, 0, 0, 0.85)';
+        ctx.fillText(`${arc.code} (${arc.count})`, arc.dx + 8, arc.dy + 3);
       }
 
-      // 3. 绘制起点（当前调度核心中心）
+      // 4. 调度中心基点
       ctx.beginPath();
-      ctx.arc(ox, oy, 4, 0, Math.PI * 2);
+      ctx.arc(ox, oy, 4.5, 0, Math.PI * 2);
       ctx.fillStyle = isDark ? '#ffffff' : '#000000';
       ctx.fill();
 
       ctx.beginPath();
-      ctx.arc(ox, oy, 8, 0, Math.PI * 2);
-      ctx.strokeStyle = isDark ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.2)';
+      ctx.arc(ox, oy, 9, 0, Math.PI * 2);
+      ctx.strokeStyle = isDark ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.35)';
+      ctx.lineWidth = 1;
       ctx.stroke();
 
       animId = requestAnimationFrame(render);
@@ -258,7 +280,7 @@ export const WorldMap: React.FC<WorldMapProps> = ({ distribution }) => {
       style={{
         position: 'relative',
         width: '100%',
-        height: '320px',
+        height: '380px',
         background: 'var(--surface-2)',
         border: '1px solid var(--border)',
         overflow: 'hidden'
@@ -275,10 +297,10 @@ export const WorldMap: React.FC<WorldMapProps> = ({ distribution }) => {
         pointerEvents: 'none'
       }}>
         <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)' }}>
-          全球节点雷达与航线拓扑 (Global Node Radar Topology)
+          全球真实地理地图与节点航线拓扑 (Real World Geography & Radar Arcs)
         </span>
         <span className="badge" style={{ fontSize: '10px' }}>
-          实时经纬度墨卡托投影
+          真实陆地版图 · 16国连通覆盖
         </span>
       </div>
 
@@ -291,7 +313,7 @@ export const WorldMap: React.FC<WorldMapProps> = ({ distribution }) => {
         zIndex: 10,
         pointerEvents: 'none'
       }}>
-        ● 调度中心 (时区基准) · 发射光斑表示测活航线 · 悬停可查看目标国家详情
+        ● 调度中心 · 发射流光光斑表示测活连通链路 · 悬停可查看目标国家详情
       </div>
 
       <canvas ref={canvasRef} style={{ display: 'block' }} />
