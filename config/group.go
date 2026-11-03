@@ -2,6 +2,15 @@ package config
 
 import "strings"
 
+// 规则集预设标识符定义
+const (
+	RulePresetProFull    = "pro_full"    // 默认最详分流矩阵 (PRO 全量，126 策略组 + 流媒体 + AI 全分流)
+	RulePresetProLite    = "pro_lite"    // 精简分流矩阵 (PRO-Lite 核心轻量)
+	RulePresetACL4SSR    = "acl4ssr"     // 经典 ACL4SSR 在线全量规则集
+	RulePresetDirectPure = "direct_pure" // 纯节点直通 (仅节点列表，不带策略组)
+	RulePresetCustom     = "custom"      // 自定义外部/内部链接 (使用 OverwriteURL)
+)
+
 // GroupConfig 代表用户在 config.yaml 的 groups 节点下定义的单组配置
 type GroupConfig struct {
 	Name               string   `json:"name" yaml:"name"`
@@ -16,6 +25,7 @@ type GroupConfig struct {
 	RenameNode         *bool    `json:"rename_node" yaml:"rename-node"`
 	AppendOriginalName *bool    `json:"append_original_name" yaml:"append-original-name"`
 	DropOnFail         *bool    `json:"drop_on_fail" yaml:"drop-on-fail"`
+	RulePreset         string   `json:"rule_preset" yaml:"rule-preset"`
 	OverwriteURL       string   `json:"overwrite_url" yaml:"overwrite-url"`
 	Timeout            int      `json:"timeout" yaml:"timeout"`
 	URLs               []string `json:"urls" yaml:"urls"`
@@ -37,6 +47,7 @@ type ResolvedGroupConfig struct {
 	RenameNode         bool
 	AppendOriginalName bool
 	DropOnFail         bool
+	RulePreset         string
 	OverwriteURL       string
 	Timeout            int
 	URLs               []string
@@ -67,6 +78,11 @@ func ResolveGroup(g GroupConfig, global Config) ResolvedGroupConfig {
 		filterProtocols = g.FilterProtocols
 	}
 
+	rulePreset := strings.TrimSpace(g.RulePreset)
+	if rulePreset == "" {
+		rulePreset = RulePresetProFull // 默认使用主人最详尽分流矩阵
+	}
+
 	res := ResolvedGroupConfig{
 		Name:               g.Name,
 		Enabled:            enabled,
@@ -80,6 +96,7 @@ func ResolveGroup(g GroupConfig, global Config) ResolvedGroupConfig {
 		RenameNode:         global.RenameNode,
 		AppendOriginalName: global.AppendOriginalName,
 		DropOnFail:         true,
+		RulePreset:         rulePreset,
 		OverwriteURL:       g.OverwriteURL,
 		Timeout:            global.Timeout,
 		URLs:               g.URLs,
@@ -139,6 +156,7 @@ func ResolveAllGroups(global Config) []ResolvedGroupConfig {
 				TagIPType:          global.TagIPType,
 				RenameNode:         global.RenameNode,
 				AppendOriginalName: global.AppendOriginalName,
+				RulePreset:         RulePresetProFull,
 				OverwriteURL:       "",
 				URLs:               cleanUrls,
 				Proxy:              "",
