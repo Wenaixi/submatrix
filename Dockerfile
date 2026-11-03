@@ -8,6 +8,7 @@ RUN apt-get update -o Acquire::Check-Valid-Until=false \
 
 WORKDIR /src
 ENV GOTOOLCHAIN=auto
+ENV GOPROXY=https://goproxy.cn,direct
 
 COPY go.mod go.sum ./
 RUN go mod tidy
