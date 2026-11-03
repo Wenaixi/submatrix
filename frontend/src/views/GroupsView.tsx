@@ -79,6 +79,9 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
         MinSpeed: 0,
         Timeout: 3000,
         OverwriteURL: "",
+        RulePreset: "pro_full",
+        FilterProtocols: ["http"],
+        Proxy: "",
         URLs: []
       }
     ]);
