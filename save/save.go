@@ -444,6 +444,94 @@ func deduplicateByProxyKey(proxies []map[string]any) []map[string]any {
 }
 
 
+// sanitizeProxyForYAML 清洗节点字典，防止外部源中由于 !!binary 导致的类型不匹配与序列化崩溃
+func sanitizeProxyForYAML(raw map[string]any) map[string]any {
+	if raw == nil {
+		return nil
+	}
+	clean := make(map[string]any, len(raw))
+	for k, v := range raw {
+		switch val := v.(type) {
+		case []byte:
+			clean[k] = string(val)
+		case []any:
+			subList := make([]any, len(val))
+			for i, elem := range val {
+				if b, ok := elem.([]byte); ok {
+					subList[i] = string(b)
+				} else {
+					subList[i] = elem
+				}
+			}
+			clean[k] = subList
+		default:
+			clean[k] = val
+		}
+	}
+	for _, stringKey := range []string{"cipher", "password", "server", "name", "raw_name", "type", "network"} {
+		if val, exists := clean[stringKey]; exists && val != nil {
+			if _, isStr := val.(string); !isStr {
+				clean[stringKey] = fmt.Sprintf("%v", val)
+			}
+		}
+	}
+	return clean
+}
+
+// fetchTemplateByPreset 根据规则预设标识符加载对应的分流规则模板
+func fetchTemplateByPreset(preset, overwriteURL string) ([]byte, error) {
+	preset = strings.ToLower(strings.TrimSpace(preset))
+	switch preset {
+	case config.RulePresetDirectPure:
+		return nil, nil // 纯节点直通模式
+	case config.RulePresetProLite:
+		return fetchLocalOrAssetTemplate("Mihomo-Rules-Lite-CDN.yaml")
+	case config.RulePresetACL4SSR:
+		return fetchLocalOrAssetTemplate("ACL4SSR_Online_Full.yaml")
+	case config.RulePresetCustom:
+		if strings.TrimSpace(overwriteURL) != "" {
+			return fetchAny(
+				utils.WarpURL(overwriteURL, utils.IsGhProxyAvailable),
+				utils.WarpURL(overwriteURL, false),
+			)
+		}
+		return fetchLocalOrAssetTemplate("Mihomo-Rules-CDN.yaml")
+	case config.RulePresetProFull, "":
+		fallthrough
+	default:
+		// 默认使用主人最详分流矩阵 (126个策略组 + 全量流媒体与AI)
+		return fetchLocalOrAssetTemplate("Mihomo-Rules-CDN.yaml")
+	}
+}
+
+// fetchLocalOrAssetTemplate 优先从 output 读取本地副本，其次从 assets/ 嵌入资产目录读取
+func fetchLocalOrAssetTemplate(filename string) ([]byte, error) {
+	saver, err := method.NewLocalSaver()
+	if err == nil {
+		candidate := filepath.Join(saver.OutputPath, filename)
+		if data, err := ReadFileIfExists(candidate); err == nil && len(data) > 0 {
+			return data, nil
+		}
+	}
+	assetCandidate := filepath.Join("assets", filename)
+	if data, err := os.ReadFile(assetCandidate); err == nil && len(data) > 0 {
+		return data, nil
+	}
+	return fetchMihomoTemplate()
+}
+
+// buildGroupMihomoYAML 将单组节点合并进组专属或内置的 Mihomo 规则模板中
+func buildGroupMihomoYAML(grp config.ResolvedGroupConfig, proxies []map[string]any) ([]byte, error) {
+	templateData, err := fetchTemplateByPreset(grp.RulePreset, grp.OverwriteURL)
+	if err != nil {
+		return nil, err
+	}
+	if len(templateData) == 0 {
+		return yaml.Marshal(map[string]any{"proxies": proxies})
+	}
+	return mergeMihomoTemplate(templateData, proxies)
+}
+
 // SaveGroupConfig 保存特定组的独立检测结果到 groups/<groupName>/ 目录
 func SaveGroupConfig(grp config.ResolvedGroupConfig, results []check.Result) {
 	if len(results) == 0 || grp.Name == "" {
@@ -472,12 +560,29 @@ func SaveGroupConfig(grp config.ResolvedGroupConfig, results []check.Result) {
 		if grp.MatchesProtocol(typ) {
 			continue
 		}
-		proxiesList = append(proxiesList, r.Proxy)
+		clean := sanitizeProxyForYAML(r.Proxy)
+		proxiesList = append(proxiesList, clean)
 	}
 
+	// 1. 保存纯节点列表 all.yaml (供 proxy-providers 引用)
 	allYamlData, err := yaml.Marshal(map[string]any{"proxies": proxiesList})
 	if err == nil {
 		_ = os.WriteFile(filepath.Join(groupDir, "all.yaml"), allYamlData, 0644)
+	}
+
+	// 2. 如果是纯节点直通预设，mihomo.yaml 也存纯节点
+	if grp.RulePreset == config.RulePresetDirectPure {
+		_ = os.WriteFile(filepath.Join(groupDir, "mihomo.yaml"), allYamlData, 0644)
+		return
+	}
+
+	// 3. 融合策略组与分流规则模板保存为完整的 mihomo.yaml (客户端开箱即用)
+	mihomoData, err := buildGroupMihomoYAML(grp, proxiesList)
+	if err == nil && len(mihomoData) > 0 {
+		_ = os.WriteFile(filepath.Join(groupDir, "mihomo.yaml"), mihomoData, 0644)
+	} else if err == nil {
+		slog.Warn("合并组规则模板失败，降级保存纯节点", "group", grp.Name, "err", err)
 		_ = os.WriteFile(filepath.Join(groupDir, "mihomo.yaml"), allYamlData, 0644)
 	}
 }
+
