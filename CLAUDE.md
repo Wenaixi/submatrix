@@ -67,3 +67,8 @@ SubMatrix 是从 `sinspired/subs-check-pro/v3` 深度独立分支演进的高性
 - **单组协议过滤拦截**: `GroupConfig` 扩展 `filter-protocols` 字段，默认过滤排除 `["http"]` 协议。在节点入库解析（`proxy/proxies.go`）、分发质检（`check/check.go`）与结果落盘（`save/save.go`）全链路拦截，直接排除明文 HTTP 废节点；
 - **节点质检分析报告 (Node Quality Analytics)**: 完整对接 `/api/analysis-report` 与 `output/stats/subs-analysis.yaml`，激活全景执行摘要、4维质检指标（探测总数、可用总数、存活率、流量耗时）、16 国地区分布进度条、协议构成分布与订阅源优劣排行榜；
 - **客户端订阅直链无感鉴权**: `authMiddleware` 支持从 URL Query（`?token=xxx` 与 `?api_key=xxx`）提取凭据，保障客户端复制直链直接拉取带有完整 126 个策略组分流规则的配置。
+
+### 单组独立规则预设与智能联动界面重构 (2026-11-03 终极版)
+- **单组独立规则预设 (RulePreset)**: 扩展 `rule_preset` 字段，支持 5 大预设：`pro_full` (默认最详 126 组 + 流媒体 + AI 分流矩阵)、`pro_lite` (核心轻量)、`acl4ssr` (全量在线规则集)、`direct_pure` (纯节点直通)、`custom` (自定义直链)；
+- **单组订阅直链完整可运行**: `SaveGroupConfig` 在输出单组 `mihomo.yaml` 时自动融合所选规则模板的策略组与规则，并加入 `sanitizeProxyForYAML` 深度自愈外部脏节点（如 `!!binary` 二进制转换异常），确保客户端直接拉取开箱即用；
+- **智能条件显隐联动 (Smart Visibility)**: 彻底消除界面干扰！当单组关闭【连通测活】时，自动收起测速、画像打标、流媒体检测、淘汰丢弃与最低速度门槛等依赖测活的功能，呈现极简透传提示条；开启测活时舒展展现 15+ 项全量控制。
