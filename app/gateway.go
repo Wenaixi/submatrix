@@ -91,6 +91,39 @@ func RegisterGroupRoutes(router *gin.Engine, outputPath string, authMiddleware g
 			return
 		}
 
+		// 智能自适应网关：若请求的是 mihomo.yaml 完整规则配置，动态将模板中的直链 Host 与 Token 替换为客户端真实访问源
+		if relPath == "mihomo.yaml" {
+			data, err := os.ReadFile(targetFile)
+			if err == nil {
+				host := c.Request.Host
+				if host == "" {
+					host = "127.0.0.1:8199"
+				}
+				token := c.Query("token")
+				if token == "" {
+					token = c.Query("api_key")
+				}
+				proto := "http"
+				if c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https" {
+					proto = "https"
+				}
+
+				content := string(data)
+				// 动态替换 Provider 直链的主机与鉴权 Token
+				content = strings.ReplaceAll(content, "127.0.0.1:8199", host)
+				if proto == "https" {
+					content = strings.ReplaceAll(content, "http://"+host, "https://"+host)
+				}
+				if token != "" && token != "wenxi-admin" {
+					content = strings.ReplaceAll(content, "token=wenxi-admin", "token="+token)
+				}
+
+				c.Header("Content-Type", "text/plain; charset=utf-8")
+				c.String(http.StatusOK, content)
+				return
+			}
+		}
+
 		c.File(targetFile)
 	})
 }
