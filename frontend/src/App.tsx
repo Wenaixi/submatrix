@@ -132,14 +132,14 @@ export const App: React.FC = () => {
     loadData();
   };
 
-  // 人性化重塑后的导航项 (通俗自然，无空洞排比)
+  // 人性化纯中文导航项
   const navItems = [
-    { id: 'groups', label: '节点分组', sub: 'Groups', icon: Layers },
-    { id: 'subs', label: '订阅链接', sub: 'Subscriptions', icon: Link2 },
-    { id: 'monitor', label: '运行日志', sub: 'Logs', icon: Activity },
-    { id: 'files', label: '本地文件', sub: 'Files', icon: FolderClosed },
-    { id: 'analysis', label: '节点统计', sub: 'Analytics', icon: BarChart2 },
-    { id: 'config', label: '系统设置', sub: 'Settings', icon: Settings },
+    { id: 'groups', label: '节点分组', icon: Layers },
+    { id: 'subs', label: '订阅链接', icon: Link2 },
+    { id: 'monitor', label: '运行日志', icon: Activity },
+    { id: 'files', label: '本地文件', icon: FolderClosed },
+    { id: 'analysis', label: '节点统计', icon: BarChart2 },
+    { id: 'config', label: '系统设置', icon: Settings },
   ] as const;
 
   return (
@@ -202,10 +202,7 @@ export const App: React.FC = () => {
                   }}
                 >
                   <Icon size={16} strokeWidth={1.7} />
-                  <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    <span style={{ fontSize: '13px', fontWeight: 500, color: isActive ? 'var(--btn-primary-fg)' : 'var(--text-primary)' }}>{item.label}</span>
-                    <span style={{ fontSize: '10px', color: isActive ? 'var(--text-muted)' : 'var(--text-secondary)', opacity: 0.8 }}>{item.sub}</span>
-                  </div>
+                  <span style={{ fontSize: '13px', fontWeight: 500, color: isActive ? 'var(--btn-primary-fg)' : 'var(--text-primary)' }}>{item.label}</span>
                 </button>
               );
             })}
