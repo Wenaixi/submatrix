@@ -10,15 +10,22 @@ interface SubscriptionsViewProps {
 export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({ listenPort, apiKey }) => {
   const { showToast } = useToast();
   const [previewContent, setPreviewContent] = useState<{ title: string; text: string } | null>(null);
-  const [selectedHostMode, setSelectedHostMode] = useState<'local' | 'lan'>('local');
+  // 优先默认采用主人的官方公网域名
+  const [selectedHostMode, setSelectedHostMode] = useState<'public' | 'lan' | 'local'>('public');
 
-  const protocol = location.protocol;
-  const portStr = listenPort ? (listenPort.startsWith(":") ? listenPort : ":" + listenPort) : (location.port ? ":" + location.port : "");
   const tokenQuery = apiKey ? `?token=${encodeURIComponent(apiKey)}` : "";
+  const publicOrigin = "https://sub-s.wenxi.dev";
+  const lanOrigin = "http://192.168.1.141:8199";
+  const localOrigin = "http://127.0.0.1:8199";
 
-  // 宿主机局域网真实 IP（支持手机、小火箭、同一 Wi-Fi 下设备访问）
-  const lanHost = "192.168.1.141";
-  const activeHost = selectedHostMode === 'lan' ? lanHost : location.hostname;
+  const getBaseOrigin = () => {
+    switch (selectedHostMode) {
+      case 'public': return publicOrigin;
+      case 'lan': return lanOrigin;
+      case 'local': return localOrigin;
+      default: return publicOrigin;
+    }
+  };
 
   const subItems = [
     {
@@ -98,25 +105,25 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({ listenPort
           </p>
         </div>
 
-        {/* 客户端使用场景切换：本机回路 vs 手机局域网 */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>使用设备：</span>
+        {/* 客户端使用场景切换：官方公网域名 vs 手机局域网 vs 本机电脑 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>服务域名源：</span>
           <button
             type="button"
-            onClick={() => setSelectedHostMode('local')}
+            onClick={() => setSelectedHostMode('public')}
             style={{
               padding: '5px 10px',
               fontSize: '12px',
               cursor: 'pointer',
-              border: selectedHostMode === 'local' ? '1px solid var(--border-black)' : '1px solid var(--border)',
-              background: selectedHostMode === 'local' ? 'var(--btn-primary-bg)' : 'var(--surface-1)',
-              color: selectedHostMode === 'local' ? 'var(--btn-primary-fg)' : 'var(--text-secondary)',
+              border: selectedHostMode === 'public' ? '1px solid var(--border-black)' : '1px solid var(--border)',
+              background: selectedHostMode === 'public' ? 'var(--btn-primary-bg)' : 'var(--surface-1)',
+              color: selectedHostMode === 'public' ? 'var(--btn-primary-fg)' : 'var(--text-secondary)',
               display: 'inline-flex',
               alignItems: 'center',
               gap: '4px'
             }}
           >
-            <Monitor size={13} /> 本机电脑 (127.0.0.1)
+            ● 官方公网域名 (sub-s.wenxi.dev)
           </button>
           <button
             type="button"
@@ -133,14 +140,31 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({ listenPort
               gap: '4px'
             }}
           >
-            <Smartphone size={13} /> 手机/外部设备 ({lanHost})
+            <Smartphone size={13} /> 手机/外部设备 (192.168.1.141)
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedHostMode('local')}
+            style={{
+              padding: '5px 10px',
+              fontSize: '12px',
+              cursor: 'pointer',
+              border: selectedHostMode === 'local' ? '1px solid var(--border-black)' : '1px solid var(--border)',
+              background: selectedHostMode === 'local' ? 'var(--btn-primary-bg)' : 'var(--surface-1)',
+              color: selectedHostMode === 'local' ? 'var(--btn-primary-fg)' : 'var(--text-secondary)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}
+          >
+            <Monitor size={13} /> 本机调试 (127.0.0.1)
           </button>
         </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(440px, 1fr))', gap: '16px' }}>
         {subItems.map((item, i) => {
-          const fullUrl = `${protocol}//${activeHost}${portStr}${item.path}${tokenQuery}`;
+          const fullUrl = `${getBaseOrigin()}${item.path}${tokenQuery}`;
           return (
             <div key={i} style={{
               background: 'var(--surface-2)',
