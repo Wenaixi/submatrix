@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { GroupItem, saveGroups, toggleGroup } from '../api/client';
 import { Switch } from '../components/Switch';
 import { useToast } from '../components/Toast';
+import { InfoTooltip } from '../components/InfoTooltip';
 import { Copy, Plus, Trash2, Save, ChevronDown, ChevronRight, Sliders } from 'lucide-react';
 
 interface GroupsViewProps {
@@ -132,7 +133,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
       }}>
         <div>
           <h2 style={{ fontSize: '18px', fontWeight: 500, color: 'var(--text-primary)', letterSpacing: '0.02em' }}>
-            节点分组 (Groups)
+            节点分组
           </h2>
           <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '2px' }}>
             管理节点分组与测活改名规则，分流或聚合订阅。
@@ -225,8 +226,14 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
               }}>
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
-                      连通测活总控 (Check Alive)
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', display: 'inline-flex', alignItems: 'center' }}>
+                      连通测活总控
+                      <InfoTooltip
+                        title="连通测活总控 (Check Alive)"
+                        desc="决定此组节点是否发起真实的连通性握手测试。"
+                        principle="通过 Mihomo 内核向目标服务器建立真实 TCP/TLS 握手并测算往返 RTT 延时。"
+                        recommend="主力节点务必开启；纯备用/免检聚合组建议关闭（进入零 I/O 毫秒级免检放行）。"
+                      />
                     </span>
                     <span className="badge" style={{ fontSize: '10px' }}>
                       {checkAlive ? '已激活全握手质检' : '纯免检直通模式'}
@@ -257,15 +264,39 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
                     border: '1px solid var(--border)'
                   }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>带宽测速</span>
+                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }}>
+                        带宽测速
+                        <InfoTooltip
+                          title="带宽测速 (Check Speed)"
+                          desc="测试节点的真实下载速度，甄别并淘汰低速慢速节点。"
+                          principle="通过节点下载真实文件测算瞬时带宽并进行抗抖动加权衰减计算。"
+                          recommend="节点适中（<500）时建议开启；海量节点免检时建议关闭以节约网络开销。"
+                        />
+                      </span>
                       <Switch checked={checkSpeed} onChange={(c) => updateGroup(idx, { CheckSpeed: c, check_speed: c })} />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>智能改名</span>
+                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }}>
+                        智能改名
+                        <InfoTooltip
+                          title="智能改名 (Rename Node)"
+                          desc="根据节点 IP 归属地与协议，自动重命名为规范统一格式（如 🇭🇰HK_01|Tag）。"
+                          principle="匹配 MaxMind GeoIP 与内部正则，按国家代码、序号与组标签规范化命名。"
+                          recommend="保持开启，可使客户端中的节点列表整齐有序。"
+                        />
+                      </span>
                       <Switch checked={renameNode} onChange={(c) => updateGroup(idx, { RenameNode: c, rename_node: c })} />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>失败丢弃</span>
+                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }}>
+                        失败丢弃
+                        <InfoTooltip
+                          title="失败丢弃 (Drop On Fail)"
+                          desc="自动剔除测活失败、超时或不可用的死节点。"
+                          principle="握手失败的节点在落盘时直接被抛弃，绝不写入导出的最终订阅。"
+                          recommend="强烈建议开启，确保客户端拿到 100% 真实可用的健康节点。"
+                        />
+                      </span>
                       <Switch checked={dropOnFail} onChange={(c) => updateGroup(idx, { DropOnFail: c, drop_on_fail: c })} />
                     </div>
                   </div>
@@ -280,16 +311,40 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
                     border: '1px solid var(--border)'
                   }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }} title="标记 |家宽、|机房 或 |移动">IP画像打标</span>
+                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }} title="标记 |家宽、|机房 或 |移动">
+                        IP画像打标
+                        <InfoTooltip
+                          title="IP画像打标 (Tag IP Type)"
+                          desc="检测并标记节点的出口网络类型（如 |家宽、|机房 或 |移动）。"
+                          principle="通过多渠道 ISP 数据库轮询识别节点出口 IP 的归属组织与网络属性。"
+                          recommend="对流媒体或游戏防封有特定需求（如需要住宅 IP）时建议开启。"
+                        />
+                      </span>
                       <Switch checked={tagIPType} onChange={(c) => updateGroup(idx, { TagIPType: c, tag_ip_type: c })} />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }} title="检测 Netflix/GPT/Gemini/YouTube 解锁">流媒体AI检测</span>
+                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }} title="检测 Netflix/GPT/Gemini/YouTube 解锁">
+                        流媒体AI检测
+                        <InfoTooltip
+                          title="流媒体AI检测 (Media Check)"
+                          desc="检测节点对 Netflix、ChatGPT、Gemini、YouTube 等平台的内容解锁能力。"
+                          principle="模拟真实客户端请求特定的鉴权与地域接口，识别解锁级别并打标。"
+                          recommend="解锁大户建议开启；测活耗时会随开启的平台数量略有增加。"
+                        />
+                      </span>
                       <Switch checked={mediaCheck} onChange={(c) => updateGroup(idx, { MediaCheck: c, media_check: c })} />
                     </div>
                     {renameNode && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }} title="在重命名后的节点末尾追加 (原名: xxx)">保留原名末尾</span>
+                        <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }} title="在重命名后的节点末尾追加 (原名: xxx)">
+                          保留原名末尾
+                          <InfoTooltip
+                            title="保留原名末尾 (Append Original Name)"
+                            desc="在重命名后的节点末尾追加原始节点名称作为参考。"
+                            principle="在生成标准名称后拼接 (原名: xxx)，方便向上溯源初始订阅源。"
+                            recommend="默认关闭，保持节点名称极简清爽；排查上游源时可开启。"
+                          />
+                        </span>
                         <Switch checked={appendOriginalName} onChange={(c) => updateGroup(idx, { AppendOriginalName: c, append_original_name: c })} />
                       </div>
                     )}
@@ -307,12 +362,28 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontSize: '12px', color: 'var(--text-primary)' }}>智能改名</span>
+                      <span style={{ fontSize: '12px', color: 'var(--text-primary)', display: 'inline-flex', alignItems: 'center' }}>
+                        智能改名
+                        <InfoTooltip
+                          title="智能改名 (Rename Node)"
+                          desc="根据节点 IP 归属地与协议，自动重命名为规范统一格式（如 🇭🇰HK_01|Tag）。"
+                          principle="匹配 MaxMind GeoIP 与内部正则，按国家代码、序号与组标签规范化命名。"
+                          recommend="保持开启，可使客户端中的节点列表整齐有序。"
+                        />
+                      </span>
                       <Switch checked={renameNode} onChange={(c) => updateGroup(idx, { RenameNode: c, rename_node: c })} />
                     </div>
                     {renameNode && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', borderLeft: '1px solid var(--border)', paddingLeft: '16px' }}>
-                        <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>保留原名末尾</span>
+                        <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }}>
+                          保留原名末尾
+                          <InfoTooltip
+                            title="保留原名末尾 (Append Original Name)"
+                            desc="在重命名后的节点末尾追加原始节点名称作为参考。"
+                            principle="在生成标准名称后拼接 (原名: xxx)，方便向上溯源初始订阅源。"
+                            recommend="默认关闭，保持节点名称极简清爽；排查上游源时可开启。"
+                          />
+                        </span>
                         <Switch checked={appendOriginalName} onChange={(c) => updateGroup(idx, { AppendOriginalName: c, append_original_name: c })} />
                       </div>
                     )}
@@ -326,8 +397,14 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
               {/* 核心名称与超时参数 (5A 智能联动简化) */}
               <div style={{ display: 'grid', gridTemplateColumns: checkAlive ? '3fr 1fr' : '1fr', gap: '10px' }}>
                 <div>
-                  <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>
-                    分组名称 (Display Name)
+                  <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', marginBottom: '3px' }}>
+                    分组名称
+                    <InfoTooltip
+                      title="分组名称 (Display Name)"
+                      desc="在控制台界面展示的人类友好标题，支持中文和 Emoji。"
+                      principle="纯粹用于前端 UI 识别，不影响底层文件与订阅路径。"
+                      recommend="填写如“公网免费”、“自建亚太”等直观易认的名称。"
+                    />
                   </label>
                   <input
                     type="text"
@@ -348,8 +425,14 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
                 </div>
                 {checkAlive && (
                   <div>
-                    <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>
-                      测活超时 (ms)
+                    <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', marginBottom: '3px' }}>
+                      测活超时 (毫秒)
+                      <InfoTooltip
+                        title="测活超时 (Timeout)"
+                        desc="单节点建立 TCP/TLS 握手的最大等待时间（毫秒）。"
+                        principle="底层 Dialer 超过此时间未完成握手则判定为连接超时失败。"
+                        recommend="直连建议设为 3000~5000ms；配置了组前置代理时建议适当放宽至 5000ms。"
+                      />
                     </label>
                     <input
                       type="number"
@@ -372,8 +455,14 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
                 <div style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: '14px', background: 'var(--surface-0)' }}>
                   {/* 第 1 模块：规则集预设选择器 */}
                   <div>
-                    <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
-                      分流规则集模板 (Rule Preset，客户端导入订阅时生效)
+                    <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', marginBottom: '6px' }}>
+                      分流规则模板 (客户端导入订阅时生效)
+                      <InfoTooltip
+                        title="分流规则集模板 (Rule Preset)"
+                        desc="决定客户端导入此组订阅时，所包含的分流策略组与规则矩阵。"
+                        principle="在生成 mihomo.yaml 时将该组节点自动注入所选模板的策略组中。"
+                        recommend="日常推荐使用【最详分流矩阵】（126个策略组全分流）。"
+                      />
                     </label>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                       {[
@@ -424,7 +513,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
                   {(g.RulePreset === 'custom' || g.rule_preset === 'custom') && (
                     <div>
                       <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>
-                        自定义规则模板链接 (Overwrite URL)
+                        自定义规则模板链接
                       </label>
                       <input
                         type="text"
@@ -439,8 +528,14 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
                   {checkAlive && checkSpeed && (
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                       <div>
-                        <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>
-                          最低下载速度门槛 (KB/s，低于此速率的节点自动淘汰)
+                        <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', marginBottom: '3px' }}>
+                          最低下载速度门槛 (KB/s)
+                          <InfoTooltip
+                            title="最低下载速度门槛 (Min Speed)"
+                            desc="剔除带宽测速低于该速率（KB/s）的弱节点。"
+                            principle="测速阶段如果节点的测得速率小于此数值，直接标记淘汰。"
+                            recommend="填 1024 (1MB/s) 即可过滤龟速节点；填 0 表示不过滤速率。"
+                          />
                         </label>
                         <input
                           type="number"
@@ -450,8 +545,14 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
                         />
                       </div>
                       <div>
-                        <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>
-                          单节点测速流量上限 (MB，8A 独立控制，防止跑爆流量)
+                        <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', marginBottom: '3px' }}>
+                          单节点测速流量上限 (MB)
+                          <InfoTooltip
+                            title="单节点测速流量上限 (Download MB)"
+                            desc="限制每个节点测速时消耗的最大流量（单位 MB）。"
+                            principle="节点测速累计下载达到此大小即立刻截断测试，防止浪费带宽。"
+                            recommend="默认 20MB；小流量机场可调小至 10MB。"
+                          />
                         </label>
                         <input
                           type="number"
@@ -465,8 +566,14 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
 
                   {/* 6A 节点保留数量上限 (SuccessLimit，默认不限) */}
                   <div>
-                    <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>
-                      单组最大保留节点数量 (Success Limit，留空或 0 表示不限)
+                    <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', marginBottom: '3px' }}>
+                      单组最大保留节点数 (留空或 0 表示不限)
+                      <InfoTooltip
+                        title="单组最大保留节点数量 (Success Limit)"
+                        desc="限制此组订阅最终导出的节点数量上限。"
+                        principle="测活和排序完成后，截取前 N 个最优质节点导出存盘。"
+                        recommend="留空或 0 表示不限；节点过多时建议填 50~100 避免客户端卡顿。"
+                      />
                     </label>
                     <input
                       type="number"
@@ -482,8 +589,14 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
                   {/* 5A 底层机器标识与节点标签微调 */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                     <div>
-                      <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>
-                        组底层 URL 标识 (Name，用于目录名与 /group/xxx/ 订阅路径)
+                      <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', marginBottom: '3px' }}>
+                        订阅直链标识 (纯英文字符)
+                        <InfoTooltip
+                          title="组底层 URL 标识 (Name)"
+                          desc="生成文件目录与客户端拉取订阅的 URL 路径（/group/xxx/）。"
+                          principle="必须是纯英文字母与数字横线，保证外部客户端请求不发生编码转义错误。"
+                          recommend="如 all-in-one、free-a，一般跟随分组名称自动生成。"
+                        />
                       </label>
                       <input
                         type="text"
@@ -493,8 +606,14 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
                       />
                     </div>
                     <div>
-                      <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>
-                        节点后缀标签 (Tag，改名后缀如 🇭🇰HK_01|Tag)
+                      <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', marginBottom: '3px' }}>
+                        节点改名标签
+                        <InfoTooltip
+                          title="节点后缀标签 (Tag)"
+                          desc="智能改名时追加在节点名称末尾的短标签（如 🇭🇰HK_01|Tag）。"
+                          principle="在重命名模版中作为组识别符，建议 2~4 个汉字。"
+                          recommend="简短有力，如“聚合”、“专线”、“免费”。"
+                        />
                       </label>
                       <input
                         type="text"
@@ -507,8 +626,14 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
 
                   {/* 组专用前置代理 */}
                   <div>
-                    <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>
-                      组专用前置代理 (Group Proxy，选填)
+                    <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', marginBottom: '3px' }}>
+                      组专用前置代理 (选填)
+                      <InfoTooltip
+                        title="组专用前置代理 (Group Proxy)"
+                        desc="为该组指定专用的前置代理服务器（HTTP/SOCKS5）。"
+                        principle="该组的所有订阅拉取、连通测活与测速流量均先经过该代理打向目标节点。"
+                        recommend="需要在特定网络出口测活时填写，如 http://127.0.0.1:10808。"
+                      />
                     </label>
                     <input
                       type="text"
@@ -523,8 +648,14 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
 
                   {/* 协议过滤配置（默认过滤 HTTP） */}
                   <div>
-                    <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
-                      协议过滤配置 (Protocol Filter，点击可切换排除状态)
+                    <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', marginBottom: '6px' }}>
+                      协议过滤配置 (点击切换排除)
+                      <InfoTooltip
+                        title="协议过滤配置 (Protocol Filter)"
+                        desc="剔除指定代理协议类型的节点。"
+                        principle="订阅流式拉取时若节点协议匹配过滤列表，直接阻断丢弃。"
+                        recommend="默认已勾选排除 HTTP 明文废节点；按需可排除特定协议。"
+                      />
                     </label>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                       {['http', 'socks5', 'vless', 'ss', 'anytls', 'trojan', 'ssr', 'hysteria2', 'tuic'].map((proto) => {
