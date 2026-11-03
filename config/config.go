@@ -128,6 +128,7 @@ type Config struct {
 	MihomoAPIURL     string   `yaml:"mihomo-api-url"`
 	MihomoAPISecret  string   `yaml:"mihomo-api-secret"`
 	ListenPort       string   `yaml:"listen-port"`
+	PublicURL        string   `yaml:"public-url" json:"public_url"`
 	RenameNode       bool     `yaml:"rename-node"`
 	UseLastResult    bool     `yaml:"use-last-result"`
 	UseHistoryResult bool     `yaml:"use-history-result"`
