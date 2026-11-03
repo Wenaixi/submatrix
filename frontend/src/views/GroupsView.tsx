@@ -695,11 +695,17 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
                   </div>
                 </div>
               </details>
-              {/* 阶梯 5：折叠式订阅源清单 */}
+              {/* 阶梯 5：折叠式订阅源清单（内置动态日期引擎支持） */}
               <details style={{ border: '1px solid var(--border)', background: 'var(--surface-1)' }}>
                 <summary style={{ padding: '8px 12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', userSelect: 'none' }}>
-                  <span style={{ fontSize: '13px', color: 'var(--text-primary)' }}>
+                  <span style={{ fontSize: '13px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
                     订阅源清单 ({urls.length} 条有效源)
+                    <InfoTooltip
+                      title="动态日期订阅源支持"
+                      desc="支持包含动态日期占位符的订阅链接，自动每日刷新最新源。"
+                      principle="支持 {ymd}、${YYYYMMDD}、{YYYY-MM-DD}、%Y-%m-%d、{YYYY}/{MM}/{DD} 等语法。检测时优先尝试今日日期；若今日源尚未发布，自动平滑拉取昨日源！"
+                      recommend="适用于每日推送的 GitHub 节点源（如 https://.../{YYYY}/{MM}/{YYYYMMDD}.yaml），填入即可终生自动跟随最新节点。"
+                    />
                   </span>
                   <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>点击展开 / 收起</span>
                 </summary>
@@ -707,7 +713,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
                   <textarea
                     rows={4}
                     value={urlsText}
-                    placeholder="每行一个订阅链接（支持外部 HTTP 订阅或内部子组聚合链接）"
+                    placeholder="每行一个订阅链接。支持动态日期语法：{ymd}、${YYYYMMDD}、{YYYY-MM-DD}、{YYYY}/{MM}/{DD}，系统每日自动尝试今日与昨日"
                     onChange={(e) => {
                       const lines = e.target.value.split("\n").map(s => s.trim()).filter(Boolean);
                       updateGroup(idx, { URLs: lines, urls: lines });
