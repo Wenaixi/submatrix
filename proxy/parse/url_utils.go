@@ -4,7 +4,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/sinspired/subs-check-pro/v3/utils"
+	"github.com/Wenaixi/submatrix/utils"
 )
 
 func SsLocalRequest(u *url.URL) bool {

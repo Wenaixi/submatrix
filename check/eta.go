@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/sinspired/subs-check-pro/v3/config"
+	"github.com/Wenaixi/submatrix/config"
 )
 
 // ETASeconds 供 /api/status 读取：-1=计算中, 0=空闲/完成, >0=剩余秒数

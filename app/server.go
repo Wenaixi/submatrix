@@ -24,12 +24,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/goccy/go-yaml"
-	"github.com/sinspired/subs-check-pro/v3/webui"
-	"github.com/sinspired/subs-check-pro/v3/check"
-	"github.com/sinspired/subs-check-pro/v3/config"
-	"github.com/sinspired/subs-check-pro/v3/save/method"
-	"github.com/sinspired/subs-check-pro/v3/substore"
-	"github.com/sinspired/subs-check-pro/v3/utils"
+	"github.com/Wenaixi/submatrix/webui"
+	"github.com/Wenaixi/submatrix/check"
+	"github.com/Wenaixi/submatrix/config"
+	"github.com/Wenaixi/submatrix/save/method"
+	"github.com/Wenaixi/submatrix/substore"
+	"github.com/Wenaixi/submatrix/utils"
 )
 
 const (
@@ -248,23 +248,15 @@ func (app *App) registerStaticRoutes(router *gin.Engine, outputPath string) {
 					c.String(http.StatusNotFound, "文件不存在")
 					return
 				}
-				host := c.Request.Host
-				if host == "" {
-					host = "127.0.0.1:8199"
-				}
+				baseURL := GetCanonicalBaseURL(c)
 				token := c.Query("token")
 				if token == "" {
 					token = c.Query("api_key")
 				}
-				proto := "http"
-				if c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https" {
-					proto = "https"
-				}
 				content := string(data)
-				content = strings.ReplaceAll(content, "127.0.0.1:8199", host)
-				if proto == "https" {
-					content = strings.ReplaceAll(content, "http://"+host, "https://"+host)
-				}
+				content = strings.ReplaceAll(content, "http://127.0.0.1:8199", baseURL)
+				content = strings.ReplaceAll(content, "https://127.0.0.1:8199", baseURL)
+				content = strings.ReplaceAll(content, "127.0.0.1:8199", strings.TrimPrefix(strings.TrimPrefix(baseURL, "https://"), "http://"))
 				if token != "" && token != "wenxi-admin" {
 					content = strings.ReplaceAll(content, "token=wenxi-admin", "token="+token)
 				}

@@ -6,10 +6,10 @@ import (
 	"strings"
 
 	"github.com/robfig/cron/v3"
-	"github.com/sinspired/subs-check-pro/v3/assets"
-	"github.com/sinspired/subs-check-pro/v3/config"
-	"github.com/sinspired/subs-check-pro/v3/substore"
-	"github.com/sinspired/subs-check-pro/v3/utils"
+	"github.com/Wenaixi/submatrix/assets"
+	"github.com/Wenaixi/submatrix/config"
+	"github.com/Wenaixi/submatrix/substore"
+	"github.com/Wenaixi/submatrix/utils"
 )
 
 // 判断是否运行在 Docker 容器中

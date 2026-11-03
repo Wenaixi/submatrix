@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sinspired/subs-check-pro/v3/config"
+	"github.com/Wenaixi/submatrix/config"
 )
 
 // DeduplicateProxies 按 server:port:type 物理特征对节点列表去重

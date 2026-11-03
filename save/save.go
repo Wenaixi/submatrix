@@ -15,11 +15,11 @@ import (
 
 	"github.com/goccy/go-yaml"
 
-	"github.com/sinspired/subs-check-pro/v3/check"
-	"github.com/sinspired/subs-check-pro/v3/config"
-	"github.com/sinspired/subs-check-pro/v3/save/method"
-	"github.com/sinspired/subs-check-pro/v3/substore"
-	"github.com/sinspired/subs-check-pro/v3/utils"
+	"github.com/Wenaixi/submatrix/check"
+	"github.com/Wenaixi/submatrix/config"
+	"github.com/Wenaixi/submatrix/save/method"
+	"github.com/Wenaixi/submatrix/substore"
+	"github.com/Wenaixi/submatrix/utils"
 )
 
 // ProxyCategory 定义代理分类

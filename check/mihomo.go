@@ -8,7 +8,7 @@ import (
 
 	"github.com/metacubex/mihomo/component/resolver"
 	"github.com/metacubex/mihomo/dns"
-	"github.com/sinspired/subs-check-pro/v3/config"
+	"github.com/Wenaixi/submatrix/config"
 )
 
 // SetupMihomoDNS 初始化并注入底层的 mihomo DNS 解析器

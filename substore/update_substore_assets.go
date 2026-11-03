@@ -16,8 +16,8 @@ import (
 
 	"github.com/buke/quickjs-go"
 	"github.com/goccy/go-json"
-	"github.com/sinspired/subs-check-pro/v3/config"
-	"github.com/sinspired/subs-check-pro/v3/utils"
+	"github.com/Wenaixi/submatrix/config"
+	"github.com/Wenaixi/submatrix/utils"
 )
 
 const subStoreAssetName = "sub-store.min.js"

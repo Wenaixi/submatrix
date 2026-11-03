@@ -3,7 +3,7 @@ package utils
 import (
 	"testing"
 
-	"github.com/sinspired/subs-check-pro/v3/config"
+	"github.com/Wenaixi/submatrix/config"
 )
 
 var TestAPI = "https://apprise.xxxxxx.com/notify"

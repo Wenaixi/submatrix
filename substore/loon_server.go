@@ -19,7 +19,7 @@ import (
 
 	"github.com/goccy/go-json"
 	"github.com/robfig/cron/v3"
-	"github.com/sinspired/subs-check-pro/v3/config"
+	"github.com/Wenaixi/submatrix/config"
 )
 
 // LoonServer 现在只持有单个 engine

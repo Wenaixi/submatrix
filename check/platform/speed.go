@@ -14,7 +14,7 @@ import (
 
 	"github.com/juju/ratelimit"
 	"github.com/metacubex/mihomo/common/convert"
-	"github.com/sinspired/subs-check-pro/v3/config"
+	"github.com/Wenaixi/submatrix/config"
 )
 
 var testURLs []string

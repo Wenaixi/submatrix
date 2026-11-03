@@ -13,7 +13,7 @@ import (
 	"bytes"
 
 	"github.com/samber/lo"
-	"github.com/sinspired/subs-check-pro/v3/utils"
+	"github.com/Wenaixi/submatrix/utils"
 
 	"net/url"
 

@@ -3,8 +3,8 @@ package proxies
 import (
 	"log/slog"
 
-	"github.com/sinspired/subs-check-pro/v3/config"
-	"github.com/sinspired/subs-check-pro/v3/utils"
+	"github.com/Wenaixi/submatrix/config"
+	"github.com/Wenaixi/submatrix/utils"
 )
 
 // initEnvironment 初始化代理环境变量

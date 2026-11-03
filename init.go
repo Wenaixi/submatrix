@@ -16,7 +16,7 @@ import (
 
 	"github.com/lmittmann/tint"
 	mihomoLog "github.com/metacubex/mihomo/log"
-	"github.com/sinspired/subs-check-pro/v3/app"
+	"github.com/Wenaixi/submatrix/app"
 )
 
 var (
