@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { AnalysisReportResponse, getAnalysisReport, SubRankingItem } from '../api/client';
 import { RefreshCw, Globe, ShieldCheck, Activity, Award, AlertTriangle, Copy, Clock, Zap, Database } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { WorldMap } from '../components/WorldMap';
 
 export const AnalysisView: React.FC = () => {
   const { showToast } = useToast();
@@ -174,6 +175,9 @@ export const AnalysisView: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* 全球节点真实雷达航线与地理拓扑地图 */}
+      <WorldMap distribution={globalAnalysis?.geography_distribution || {}} />
 
       {/* 国家与协议分布双栏极简看板 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '16px' }}>

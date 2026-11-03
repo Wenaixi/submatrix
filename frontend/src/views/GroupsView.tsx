@@ -72,7 +72,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
         CheckAlive: true,
         CheckSpeed: false,
         RenameNode: true,
-        AppendOriginalName: true,
+        AppendOriginalName: false,
         TagIPType: true,
         MediaCheck: false,
         DropOnFail: true,
@@ -168,7 +168,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
           const dropOnFail = (g.DropOnFail ?? g.drop_on_fail ?? g.dropOnFail) !== false;
 
           // 高阶 3 项质检打标开关 (前作核心回归)
-          const appendOriginalName = (g.AppendOriginalName ?? g.append_original_name ?? g.appendOriginalName) !== false;
+          const appendOriginalName = Boolean(g.AppendOriginalName ?? g.append_original_name ?? g.appendOriginalName ?? false);
           const tagIPType = (g.TagIPType ?? g.tag_ip_type ?? g.tagIPType) !== false;
           const mediaCheck = (g.MediaCheck ?? g.media_check ?? g.mediaCheck) === true;
 
