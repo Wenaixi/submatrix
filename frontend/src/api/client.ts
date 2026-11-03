@@ -83,6 +83,8 @@ export interface GroupItem {
   Proxy?: string;
   FilterProtocols?: string[];
   RulePreset?: string;
+  SuccessLimit?: number;
+  DownloadMB?: number;
   // 健全容错兼容字段
   name?: string;
   displayName?: string;
@@ -114,6 +116,10 @@ export interface GroupItem {
   filterProtocols?: string[];
   rule_preset?: string;
   rulePreset?: string;
+  success_limit?: number;
+  successLimit?: number;
+  download_mb?: number;
+  downloadMB?: number;
 }
 
 export interface GroupsResponse {

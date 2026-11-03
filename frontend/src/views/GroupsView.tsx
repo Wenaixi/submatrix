@@ -213,21 +213,49 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
                 />
               </div>
 
-              {/* 阶梯 1 & 2：智能探测与质检开关（测活关闭时智能收起联动） */}
+              {/* 一级总控：连通测活总控横幅 (1A 独立指挥条) */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '12px 14px',
+                background: checkAlive ? 'var(--surface-1)' : 'var(--surface-0)',
+                border: checkAlive ? '1px solid var(--border-black)' : '1px dashed var(--border)',
+                transition: 'all 0.2s ease'
+              }}>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                      连通测活总控 (Check Alive)
+                    </span>
+                    <span className="badge" style={{ fontSize: '10px' }}>
+                      {checkAlive ? '已激活全握手质检' : '纯免检直通模式'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '3px' }}>
+                    {checkAlive
+                      ? '开启后将对所有节点发起真实 TCP/TLS 握手探测与可用性甄别。'
+                      : '关闭后进入零 I/O 纯免检直通模式，节点全量放行，测速与画像自动收起。'}
+                  </div>
+                </div>
+                <Switch
+                  checked={checkAlive}
+                  onChange={(c) => updateGroup(idx, { CheckAlive: c, check_alive: c })}
+                />
+              </div>
+
+              {/* 阶梯 1 & 2：智能探测与质检开关（测活关闭时彻底收起 2A/3A） */}
               {checkAlive ? (
                 <>
+                  {/* 基础探测开关 */}
                   <div style={{
                     display: 'grid',
-                    gridTemplateColumns: 'repeat(4, 1fr)',
+                    gridTemplateColumns: 'repeat(3, 1fr)',
                     gap: '8px',
                     padding: '10px 12px',
                     background: 'var(--surface-1)',
                     border: '1px solid var(--border)'
                   }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>连通测活</span>
-                      <Switch checked={checkAlive} onChange={(c) => updateGroup(idx, { CheckAlive: c, check_alive: c })} />
-                    </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                       <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>带宽测速</span>
                       <Switch checked={checkSpeed} onChange={(c) => updateGroup(idx, { CheckSpeed: c, check_speed: c })} />
@@ -242,18 +270,15 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
                     </div>
                   </div>
 
+                  {/* 高阶打标与画像开关 (含智能改名伴生的保留原名 3A) */}
                   <div style={{
                     display: 'grid',
-                    gridTemplateColumns: 'repeat(3, 1fr)',
+                    gridTemplateColumns: renameNode ? 'repeat(3, 1fr)' : 'repeat(2, 1fr)',
                     gap: '8px',
                     padding: '10px 12px',
                     background: 'var(--surface-1)',
                     border: '1px solid var(--border)'
                   }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }} title="在重命名后的节点末尾追加 (原名: xxx)">保留原名末尾</span>
-                      <Switch checked={appendOriginalName} onChange={(c) => updateGroup(idx, { AppendOriginalName: c, append_original_name: c })} />
-                    </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                       <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }} title="标记 |家宽、|机房 或 |移动">IP画像打标</span>
                       <Switch checked={tagIPType} onChange={(c) => updateGroup(idx, { TagIPType: c, tag_ip_type: c })} />
@@ -262,75 +287,85 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
                       <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }} title="检测 Netflix/GPT/Gemini/YouTube 解锁">流媒体AI检测</span>
                       <Switch checked={mediaCheck} onChange={(c) => updateGroup(idx, { MediaCheck: c, media_check: c })} />
                     </div>
+                    {renameNode && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }} title="在重命名后的节点末尾追加 (原名: xxx)">保留原名末尾</span>
+                        <Switch checked={appendOriginalName} onChange={(c) => updateGroup(idx, { AppendOriginalName: c, append_original_name: c })} />
+                      </div>
+                    )}
                   </div>
                 </>
               ) : (
+                /* 测活关闭：除智能改名外全部收起 (2A & 3A) */
                 <div style={{
                   display: 'flex',
-                  flexDirection: 'column',
-                  gap: '8px',
-                  padding: '12px 14px',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '10px 12px',
                   background: 'var(--surface-1)',
-                  border: '1px dashed var(--border)'
+                  border: '1px solid var(--border)'
                 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)' }}>连通测活</span>
-                      <Switch checked={checkAlive} onChange={(c) => updateGroup(idx, { CheckAlive: c, check_alive: c })} />
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>智能改名</span>
+                      <span style={{ fontSize: '12px', color: 'var(--text-primary)' }}>智能改名</span>
                       <Switch checked={renameNode} onChange={(c) => updateGroup(idx, { RenameNode: c, rename_node: c })} />
                     </div>
+                    {renameNode && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', borderLeft: '1px solid var(--border)', paddingLeft: '16px' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>保留原名末尾</span>
+                        <Switch checked={appendOriginalName} onChange={(c) => updateGroup(idx, { AppendOriginalName: c, append_original_name: c })} />
+                      </div>
+                    )}
                   </div>
-                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                    提示：此分组已设为免检直通模式（关闭连通测活）。测速、画像打标、流媒体检测与淘汰丢弃等依赖测活的功能已自动收起，节点将直接全量放行。
-                  </div>
+                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                    免检模式仅提供文本正则智能改名，其余探测与丢弃功能已自动收起
+                  </span>
                 </div>
               )}
 
-              {/* 阶梯 3：核心标识与超时参数 (4 列紧凑输入) */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
+              {/* 核心名称与超时参数 (5A 智能联动简化) */}
+              <div style={{ display: 'grid', gridTemplateColumns: checkAlive ? '3fr 1fr' : '1fr', gap: '10px' }}>
                 <div>
-                  <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>组标识 (Name)</label>
+                  <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>
+                    分组名称 (Display Name)
+                  </label>
                   <input
                     type="text"
-                    value={name}
-                    onChange={(e) => updateGroup(idx, { Name: e.target.value.trim(), name: e.target.value.trim() })}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>显示名称</label>
-                  <input
-                    type="text"
+                    placeholder="例如：公网免费专选、亚太自建"
                     value={displayName}
-                    onChange={(e) => updateGroup(idx, { DisplayName: e.target.value, displayName: e.target.value, display_name: e.target.value })}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const patch: Partial<GroupItem> = {
+                        DisplayName: val, displayName: val, display_name: val
+                      };
+                      if (!name || name.startsWith('group-') || name === 'default') {
+                        const slug = val.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+                        if (slug) { patch.Name = slug; patch.name = slug; }
+                      }
+                      updateGroup(idx, patch);
+                    }}
                   />
                 </div>
-                <div>
-                  <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>节点标签 (Tag)</label>
-                  <input
-                    type="text"
-                    value={tag}
-                    onChange={(e) => updateGroup(idx, { Tag: e.target.value, tag: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>超时 (ms)</label>
-                  <input
-                    type="number"
-                    value={timeout}
-                    onChange={(e) => updateGroup(idx, { Timeout: parseInt(e.target.value) || 3000, timeout: parseInt(e.target.value) || 3000 })}
-                  />
-                </div>
+                {checkAlive && (
+                  <div>
+                    <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>
+                      测活超时 (ms)
+                    </label>
+                    <input
+                      type="number"
+                      value={timeout}
+                      onChange={(e) => updateGroup(idx, { Timeout: parseInt(e.target.value) || 3000, timeout: parseInt(e.target.value) || 3000 })}
+                    />
+                  </div>
+                )}
               </div>
 
-              {/* 阶梯 4：高级过滤、规则模板与组代理 */}
+              {/* 阶梯 4：高级过滤、分流规则模板与单组参数 (折叠区) */}
               <details style={{ border: '1px solid var(--border)', background: 'var(--surface-1)' }}>
                 <summary style={{ padding: '8px 12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', userSelect: 'none' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <Sliders size={13} color="var(--text-secondary)" />
-                    <span style={{ fontSize: '13px', color: 'var(--text-primary)' }}>高级过滤、规则模板与组代理</span>
+                    <span style={{ fontSize: '13px', color: 'var(--text-primary)' }}>高级过滤、分流规则模板与单组参数</span>
                   </div>
                   <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>点击展开 / 收起</span>
                 </summary>
@@ -400,20 +435,75 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
                     </div>
                   )}
 
-                  {/* 仅在测活开启时展现最低速度门槛 */}
-                  {checkAlive && (
-                    <div>
-                      <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>
-                        最低下载速度门槛 (KB/s，低于此速率的节点自动淘汰)
-                      </label>
-                      <input
-                        type="number"
-                        placeholder="0 表示不过滤速率"
-                        value={minSpeed || ''}
-                        onChange={(e) => updateGroup(idx, { MinSpeed: parseInt(e.target.value) || 0, min_speed: parseInt(e.target.value) || 0 })}
-                      />
+                  {/* 测速专属微调参数 (8A)：仅当测活与测速都开启时展现 */}
+                  {checkAlive && checkSpeed && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                      <div>
+                        <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>
+                          最低下载速度门槛 (KB/s，低于此速率的节点自动淘汰)
+                        </label>
+                        <input
+                          type="number"
+                          placeholder="0 表示不过滤速率"
+                          value={minSpeed || ''}
+                          onChange={(e) => updateGroup(idx, { MinSpeed: parseInt(e.target.value) || 0, min_speed: parseInt(e.target.value) || 0 })}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>
+                          单节点测速流量上限 (MB，8A 独立控制，防止跑爆流量)
+                        </label>
+                        <input
+                          type="number"
+                          placeholder="默认 20 MB"
+                          value={g.DownloadMB || g.download_mb || ''}
+                          onChange={(e) => updateGroup(idx, { DownloadMB: parseInt(e.target.value) || 0, download_mb: parseInt(e.target.value) || 0 })}
+                        />
+                      </div>
                     </div>
                   )}
+
+                  {/* 6A 节点保留数量上限 (SuccessLimit，默认不限) */}
+                  <div>
+                    <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>
+                      单组最大保留节点数量 (Success Limit，留空或 0 表示不限)
+                    </label>
+                    <input
+                      type="number"
+                      placeholder="0 表示保留所有有效节点，建议填写 50~200 防止客户端卡顿"
+                      value={g.SuccessLimit || g.success_limit || ''}
+                      onChange={(e) => updateGroup(idx, { SuccessLimit: parseInt(e.target.value) || 0, success_limit: parseInt(e.target.value) || 0 })}
+                    />
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                      测活和排序完成后，将自动截取前 N 个最优质节点导出，避免订阅体积过大。
+                    </div>
+                  </div>
+
+                  {/* 5A 底层机器标识与节点标签微调 */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div>
+                      <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>
+                        组底层 URL 标识 (Name，用于目录名与 /group/xxx/ 订阅路径)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="all-in-one / free-a"
+                        value={name}
+                        onChange={(e) => updateGroup(idx, { Name: e.target.value.trim(), name: e.target.value.trim() })}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>
+                        节点后缀标签 (Tag，改名后缀如 🇭🇰HK_01|Tag)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="建议 2~4 个汉字"
+                        value={tag}
+                        onChange={(e) => updateGroup(idx, { Tag: e.target.value.trim(), tag: e.target.value.trim() })}
+                      />
+                    </div>
+                  </div>
 
                   {/* 组专用前置代理 */}
                   <div>
@@ -474,7 +564,6 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
                   </div>
                 </div>
               </details>
-
               {/* 阶梯 5：折叠式订阅源清单 */}
               <details style={{ border: '1px solid var(--border)', background: 'var(--surface-1)' }}>
                 <summary style={{ padding: '8px 12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', userSelect: 'none' }}>

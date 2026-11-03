@@ -31,6 +31,8 @@ type GroupConfig struct {
 	URLs               []string `json:"urls" yaml:"urls"`
 	Proxy              string   `json:"proxy" yaml:"proxy"`
 	FilterProtocols    []string `json:"filter_protocols" yaml:"filter-protocols"`
+	SuccessLimit       *int32   `json:"success_limit" yaml:"success-limit"`
+	DownloadMB         *int     `json:"download_mb" yaml:"download-mb"`
 }
 
 // ResolvedGroupConfig 级联继承全局配置后的最终可执行组配置
@@ -53,6 +55,8 @@ type ResolvedGroupConfig struct {
 	URLs               []string
 	Proxy              string
 	FilterProtocols    []string
+	SuccessLimit       int32
+	DownloadMB         int
 }
 
 // MatchesProtocol 检查指定协议是否属于本组配置过滤排除的协议
@@ -135,6 +139,14 @@ func ResolveGroup(g GroupConfig, global Config) ResolvedGroupConfig {
 	if g.Timeout > 0 {
 		res.Timeout = g.Timeout
 	}
+	res.SuccessLimit = global.SuccessLimit
+	if g.SuccessLimit != nil {
+		res.SuccessLimit = *g.SuccessLimit
+	}
+	res.DownloadMB = global.DownloadMB
+	if g.DownloadMB != nil && *g.DownloadMB > 0 {
+		res.DownloadMB = *g.DownloadMB
+	}
 	return res
 }
 
@@ -161,6 +173,8 @@ func ResolveAllGroups(global Config) []ResolvedGroupConfig {
 				URLs:               cleanUrls,
 				Proxy:              "",
 				FilterProtocols:    []string{"http"},
+				SuccessLimit:       global.SuccessLimit,
+				DownloadMB:         global.DownloadMB,
 			},
 		}
 	}

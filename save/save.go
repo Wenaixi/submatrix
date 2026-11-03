@@ -564,6 +564,12 @@ func SaveGroupConfig(grp config.ResolvedGroupConfig, results []check.Result) {
 		proxiesList = append(proxiesList, clean)
 	}
 
+	// 0. 单组节点保留数量上限拦截 (SuccessLimit，截取前 N 个最优质节点)
+	if grp.SuccessLimit > 0 && len(proxiesList) > int(grp.SuccessLimit) {
+		slog.Info("单组节点上限生效，截取最优节点", "组", grp.Name, "原数量", len(proxiesList), "截取后", grp.SuccessLimit)
+		proxiesList = proxiesList[:grp.SuccessLimit]
+	}
+
 	// 1. 保存纯节点列表 all.yaml (供 proxy-providers 引用)
 	allYamlData, err := yaml.Marshal(map[string]any{"proxies": proxiesList})
 	if err == nil {

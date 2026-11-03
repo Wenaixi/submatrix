@@ -709,6 +709,14 @@ func (pc *ProxyChecker) distributeJobs(proxies []map[string]any, ctx context.Con
 					mapping["group_proxy"] = grp.Proxy
 				}
 
+				// 4A 核心免检直通深层重构：若所属组已关闭连通测活，彻底跳过网络握手，0 网络 I/O 瞬间放行
+				if !grp.CheckAlive {
+					pc.pt.CountAlive(true)
+					r := Result{Proxy: mapping}
+					pc.scoreAndRecycle(mapping, "success", 0, &r)
+					continue
+				}
+
 				cli := CreateClient(mapping)
 				if cli == nil {
 					// 创建失败：视为 alive 完成（失败），不进入 speed/media
