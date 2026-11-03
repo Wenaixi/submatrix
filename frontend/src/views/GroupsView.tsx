@@ -719,14 +719,14 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
               {/* 底部直链复制与删除操作栏 */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '10px', borderTop: '1px solid var(--border)', flexWrap: 'wrap', gap: '8px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                  <button onClick={() => copyLink(`${baseLink}/all.yaml${tokenQuery}`)}>
-                    <Copy size={13} /> 复制 Clash
+                  <button onClick={() => copyLink(`${baseLink}/mihomo.yaml${tokenQuery}`)} className="btn-primary" title="自动配置好126个策略组与全分流规则，导入直接起飞">
+                    <Copy size={13} /> 复制完整订阅 (Clash/Mihomo 通用)
                   </button>
-                  <button onClick={() => copyLink(`${baseLink}/mihomo.yaml${tokenQuery}`)}>
-                    <Copy size={13} /> 复制 Mihomo
+                  <button onClick={() => copyLink(`${baseLink}/base64.txt${tokenQuery}`)} title="小火箭 / v2rayN 通用标准订阅">
+                    <Copy size={13} /> 复制通用订阅 (Base64)
                   </button>
-                  <button onClick={() => copyLink(`${baseLink}/base64.txt${tokenQuery}`)}>
-                    <Copy size={13} /> 复制 Base64
+                  <button onClick={() => copyLink(`${baseLink}/all.yaml${tokenQuery}`)} className="btn-ghost" title="仅纯节点列表，供第三方配置作 proxy-providers 引用">
+                    <Copy size={13} /> 复制纯节点池
                   </button>
                 </div>
                 <button onClick={() => deleteGroup(idx)} className="btn-danger" style={{ padding: '4px 8px' }}>

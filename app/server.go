@@ -232,10 +232,11 @@ func (app *App) registerStaticRoutes(router *gin.Engine, outputPath string) {
 	// })
 
 	protectedFiles := map[string]string{
-		"/all.yaml":     "all.yaml",     // 最新节点
+		"/all.yaml":     "all.yaml",     // 最新全量配置
 		"/history.yaml": "history.yaml", // 历史节点
-		"/base64.yaml":  "base64.yaml",  // Base64 格式
-		"/mihomo.yaml":  "mihomo.yaml",  // Mihomo 格式
+		"/base64.yaml":  "base64.txt",   // Base64 兼容格式
+		"/base64.txt":   "base64.txt",   // Base64 标准文本
+		"/mihomo.yaml":  "mihomo.yaml",  // Mihomo 全量带规则配置
 	}
 	for routePath, fileName := range protectedFiles {
 		// 映射到 outputPath/sub 下的文件

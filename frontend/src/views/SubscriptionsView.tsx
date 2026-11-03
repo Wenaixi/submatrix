@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Copy, Eye, X } from 'lucide-react';
+import { Copy, Eye, X, Smartphone, Monitor } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 interface SubscriptionsViewProps {
@@ -10,41 +10,50 @@ interface SubscriptionsViewProps {
 export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({ listenPort, apiKey }) => {
   const { showToast } = useToast();
   const [previewContent, setPreviewContent] = useState<{ title: string; text: string } | null>(null);
-  const host = location.hostname;
+  const [selectedHostMode, setSelectedHostMode] = useState<'local' | 'lan'>('local');
+
   const protocol = location.protocol;
   const portStr = listenPort ? (listenPort.startsWith(":") ? listenPort : ":" + listenPort) : (location.port ? ":" + location.port : "");
   const tokenQuery = apiKey ? `?token=${encodeURIComponent(apiKey)}` : "";
 
+  // 宿主机局域网真实 IP（支持手机、小火箭、同一 Wi-Fi 下设备访问）
+  const lanHost = "192.168.1.141";
+  const activeHost = selectedHostMode === 'lan' ? lanHost : location.hostname;
+
   const subItems = [
     {
-      name: "Clash 全量聚合订阅",
-      client: "Clash / Clash Verge / Clash Meta",
-      path: "/all.yaml",
-      desc: "包含所有经过质检或透传聚合的完整节点配置"
-    },
-    {
-      name: "Mihomo 专享订阅",
-      client: "Mihomo Party / Clash.Meta",
+      name: "Clash / Verge / Mihomo 全能完整订阅",
+      client: "Clash Verge / Mihomo / CFW / FlClash 通用",
       path: "/mihomo.yaml",
-      desc: "适配最新 Meta 内核特性的专用 YAML 配置"
+      desc: "已自动配置好 126 个精细策略组与全量分流规则，客户端直接导入即用（强烈推荐）",
+      highlight: true
     },
     {
-      name: "Base64 通用订阅",
-      client: "v2rayN / Shadowrocket / QuantumultX",
-      path: "/base64.yaml",
-      desc: "纯标准 Base64 格式字符串，兼容所有主流客户端"
+      name: "通用 Base64 订阅",
+      client: "小火箭 / v2rayN / Shadowrocket / QuantumultX",
+      path: "/base64.txt",
+      desc: "标准 Base64 格式，适合移动端小火箭、v2rayN 一键订阅，无 404 故障",
+      highlight: false
     },
     {
-      name: "历史归档订阅",
+      name: "纯节点池 (Proxy Provider 专用)",
+      client: "供第三方配置文件外部引用",
+      path: "/all.yaml",
+      desc: "仅包含纯 proxies 节点列表，适合高端玩家放在自己配置的 proxy-providers 节点池中",
+      highlight: false
+    },
+    {
+      name: "历史归档可用池",
       client: "全客户端可用",
       path: "/history.yaml",
-      desc: "保留最近多次探测可用节点的历史累积池"
+      desc: "保留最近多次探测均健康的累计优质节点",
+      highlight: false
     }
   ];
 
   const copy = (url: string) => {
     if (navigator.clipboard) {
-      navigator.clipboard.writeText(url).then(() => showToast("订阅地址已复制"));
+      navigator.clipboard.writeText(url).then(() => showToast("订阅地址已复制到剪贴板"));
     } else {
       const inp = document.createElement("input");
       inp.value = url;
@@ -52,7 +61,7 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({ listenPort
       inp.select();
       document.execCommand("copy");
       inp.remove();
-      showToast("订阅地址已复制");
+      showToast("订阅地址已复制到剪贴板");
     }
   };
 
@@ -69,26 +78,73 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({ listenPort
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      {/* 顶部标题与网络地址切换 */}
       <div style={{
         padding: '16px 20px',
         background: 'var(--surface-2)',
-        border: '1px solid var(--border)'
+        border: '1px solid var(--border)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: '12px'
       }}>
-        <h2 style={{ fontSize: '18px', fontWeight: 500, color: 'var(--text-primary)' }}>
-          订阅链接 (Subscriptions)
-        </h2>
-        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-          支持各大客户端协议直链，内置自动鉴权机制。
-        </p>
+        <div>
+          <h2 style={{ fontSize: '18px', fontWeight: 500, color: 'var(--text-primary)' }}>
+            订阅链接
+          </h2>
+          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+            已为您自动配置好全量分流策略组与规则，支持直接导入客户端。
+          </p>
+        </div>
+
+        {/* 客户端使用场景切换：本机回路 vs 手机局域网 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>使用设备：</span>
+          <button
+            type="button"
+            onClick={() => setSelectedHostMode('local')}
+            style={{
+              padding: '5px 10px',
+              fontSize: '12px',
+              cursor: 'pointer',
+              border: selectedHostMode === 'local' ? '1px solid var(--border-black)' : '1px solid var(--border)',
+              background: selectedHostMode === 'local' ? 'var(--btn-primary-bg)' : 'var(--surface-1)',
+              color: selectedHostMode === 'local' ? 'var(--btn-primary-fg)' : 'var(--text-secondary)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}
+          >
+            <Monitor size={13} /> 本机电脑 (127.0.0.1)
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedHostMode('lan')}
+            style={{
+              padding: '5px 10px',
+              fontSize: '12px',
+              cursor: 'pointer',
+              border: selectedHostMode === 'lan' ? '1px solid var(--border-black)' : '1px solid var(--border)',
+              background: selectedHostMode === 'lan' ? 'var(--btn-primary-bg)' : 'var(--surface-1)',
+              color: selectedHostMode === 'lan' ? 'var(--btn-primary-fg)' : 'var(--text-secondary)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}
+          >
+            <Smartphone size={13} /> 手机/外部设备 ({lanHost})
+          </button>
+        </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '16px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(440px, 1fr))', gap: '16px' }}>
         {subItems.map((item, i) => {
-          const fullUrl = `${protocol}//${host}${portStr}${item.path}${tokenQuery}`;
+          const fullUrl = `${protocol}//${activeHost}${portStr}${item.path}${tokenQuery}`;
           return (
             <div key={i} style={{
               background: 'var(--surface-2)',
-              border: '1px solid var(--border)',
+              border: item.highlight ? '1px solid var(--border-black)' : '1px solid var(--border)',
               padding: '18px 20px',
               display: 'flex',
               flexDirection: 'column',
@@ -97,7 +153,10 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({ listenPort
             }}>
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <h3 style={{ fontSize: '15px', fontWeight: 500, color: 'var(--text-primary)' }}>{item.name}</h3>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <h3 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>{item.name}</h3>
+                    {item.highlight && <span className="badge" style={{ fontSize: '10px' }}>推荐</span>}
+                  </div>
                   <span className="badge">{item.client}</span>
                 </div>
                 <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>{item.desc}</p>
@@ -116,7 +175,7 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({ listenPort
               </div>
 
               <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
-                <button onClick={() => copy(fullUrl)} className="btn-primary" style={{ flex: 1 }}>
+                <button onClick={() => copy(fullUrl)} className={item.highlight ? "btn-primary" : "btn-secondary"} style={{ flex: 1 }}>
                   <Copy size={13} /> 复制直链
                 </button>
                 <button onClick={() => handlePreview(item.name, fullUrl)} className="btn-ghost">
@@ -128,7 +187,6 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({ listenPort
         })}
       </div>
 
-      {/* 内嵌式预览浮层，彻底替代 window.open */}
       {previewContent && (
         <div style={{
           position: 'fixed',
