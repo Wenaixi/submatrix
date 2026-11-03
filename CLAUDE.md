@@ -1,74 +1,29 @@
-# SubMatrix 架构规范与记忆库 (SubMatrix Architectural Specification)
+# SubMatrix 核心工程架构与记忆库
 
-## 一、项目定位与核心使命
-SubMatrix 是从 `sinspired/subs-check-pro/v3` 深度独立分支演进的高性能、现代化订阅拓扑矩阵与多级质检分发系统。
-- **独立仓库**: `https://github.com/Wenaixi/submatrix`
-- **官方镜像**: `wenxiloveyou/submatrix:latest`
-- **单端口核心原则**: 宿主机仅对外暴露唯一的 `8199` 端口，内部伴生的 Sub-Store 引擎 (`127.0.0.1:8299`) 严格通过 Go 反向代理 (`/sub-store/*`) 运作，对外完全作为 SubMatrix 的内部节点转换内核，杜绝多端口冲突与外部暴露。
+## 项目定位
+- 仓库命名空间：`github.com/Wenaixi/submatrix`（全仓已彻底去外部化，归属主人专属命名空间）
+- 核心引擎：高性能订阅拓扑矩阵与检测筛选工具（基于 Go 1.24+ 与 React 18 SPA 架构）
+- 部署镜像：`wenxiloveyou/submatrix:latest`（本地 Docker 构建并同步发布至 GitHub Packages / Docker Hub）
 
----
+## 关键技术架构与设计规范
 
-## 二、前端现代化 React 单页应用架构 (React 18 SPA)
+### 1. 全自动规则装配与域名自适应 (Auto-Configured Rules & Adaptive Host)
+- **零硬编码安全原则**：系统代码与前端界面严禁硬编码任何私人/私有域名。
+- **纯动态自适应**：
+  - 前端：采用 `location.origin` 动态自适应当前访问源，支持在【订阅链接】界面填入可选的自定义外部域名并持久化于 `localStorage`；
+  - 后端网关：在 `app/gateway.go` 与 `app/server.go` 中通过 `GetCanonicalBaseURL(c)` 自动捕获 `X-Forwarded-Proto`、`X-Forwarded-Host` 与 `c.Request.Host`；
+  - 自动重写：当客户端拉取 `mihomo.yaml` 时，服务端自动将 2298 行完整规则模板中的 `ProviderALL` 直链动态重写为当前可访问的对应组 `all.yaml` 地址，确保客户端瞬间秒拉 Provider 绝不报 Host 错误。
 
-### 1. 技术栈与工程目录
-- **核心框架**: React 18 + TypeScript + Vite
-- **源码目录**: `artifacts/submatrix/frontend/`
-- **编译产物**: `artifacts/submatrix/webui/static/dist/` (`app.js` + `app.css`)
-- **嵌入机制**: Go `webui/embed.go` 原生嵌入静态产物，`admin.html` 作为轻量 SPA 挂载壳。
+### 2. 模块结构与命名空间
+- 根模块声明：`module github.com/Wenaixi/submatrix`
+- 内部子包统一路径：
+  - `github.com/Wenaixi/submatrix/config`
+  - `github.com/Wenaixi/submatrix/check`
+  - `github.com/Wenaixi/submatrix/save`
+  - `github.com/Wenaixi/submatrix/app`
+  - `github.com/Wenaixi/submatrix/webui`
+  - `github.com/Wenaixi/submatrix/utils`
 
-### 2. 单页视图规划 (100% 零功能遗漏)
-- `<GroupsView>`（默认首屏主舞台）：拓扑矩阵调度中心。提供双栏规整卡片流、4 列独立微型开关（连通测活/带宽测速/智能改名/失败丢弃）、折叠式订阅源编辑、大号黑白高对比直链复制键（Clash/Mihomo/Base64）与一键保存持久化。彻底去除画蛇添足的“快速预设”药丸，回归规整纯粹。
-- `<SubscriptionsView>`：全量订阅大厅。卡片化集中管理 Clash 全量、Mihomo 专享、Base64 通用与历史归档订阅直链。
-- `<MonitorView>`：运行监控与黑匣子终端。顶部常驻节点总数、可用量、当前进度与 ETA 预估微条；下方提供全屏等宽字型日志终端，支持实时滚屏、关键词检索、一键清空与复制。
-- `<FilesView>`：内置文件管理。彻底取代旧式跳出弹窗的 `files.html`，在当前单页无缝加载 output 目录文件列表，支持在线代码高亮预览抽屉、一键下载与直链复制。
-- `<AnalysisView>`：节点质检分析报告。彻底取代旧式跳出弹窗的 `analysis.html`，以极简数据微卡与极细线框呈现多维质量指标（存活率、平均带宽、国家地区画像分布、代理协议占比）。
-- `<ConfigView>`：系统高级配置中心。提供纯文本 RAW YAML 编辑器，直通 `config.yaml` 底层参数，支持即时保存并触发 Go 后端热重载。
-- `<AuthGuard>` / `login.html`：纯白极简系统访问认证卡片。
-
----
-
-## 三、视觉与设计系统规范 (Claude Design System 深度实施)
-
-### 1. 纯白为主与极致全黑深色双模系统 (Monochrome Dual-Mode)
-- **纯白默认模式 (White-Dominant)**:
-  - 页面背景 `--surface-1: #FAFAFA`
-  - 工作台底座 `--surface-0: #FFFFFF`
-  - 卡片与输入框 `--surface-2: #FFFFFF`
-  - 曜石黑正文字体 `--text-primary: #09090B`
-  - 次级信息中性灰 `--text-secondary: #71717A`
-- **全黑深色模式 (Pitch Black)**:
-  - 页面背景 `--surface-1: #09090B`
-  - 核心基底 `--surface-0: #000000`
-  - 卡片容器 `--surface-2: #101012`
-  - 纯白正文字体 `--text-primary: #FFFFFF`
-  - 次级信息冷银灰 `--text-secondary: #A1A1AA`
-- **顶栏一键切换**: 顶栏右侧提供无边框 `Sun` / `Moon` 线性矢量图标按钮，无缝双向切换，自动记忆写入 LocalStorage。
-
-### 2. 严苛设计铁律
-1. **绝对禁止 Emoji**: 全站任何界面、按钮、提示与 Toast 中一律严禁出现 Emoji 表情符号，全部采用 1.5px 极细线性 Outline 矢量图标（`lucide-react`）；
-2. **纯粹扁平 (Pure Flat)**: 严禁出现任何渐变、噪点、发光、彩色霓虹光晕与投影（drop-shadow）；
-3. **字重锁定**: 严格锁定在 `400`（常规）和 `500`（中粗）两档，严禁使用粗笨的 600/700；
-4. **精密线框 (Hairline Borders)**: 统一采用 `0.5px` ~ `1px solid var(--border)` 微细线框；
-5. **迪特·拉姆斯机械开关 (Matrix Switch)**: 停用时浅灰底座白滑块，启用时纯黑底座白滑块（深色模式下反色高亮），黑白分明，机械触感十足。
-6. **彻底消灭跳出与参数**: 严禁使用 `window.open` 弹新标签页，消灭所有 `?theme=dark` 拼接参数。
-
-
----
-
-## 三、近期架构与功能交付里程碑 (2026-11-03)
-- **单组 15 项参数独立微调**: 实现了基础 4 开关、高阶 3 打标（保留原名末尾、IP画像打标、流媒体AI检测）、基础 4 参数、门槛与重写 2 项微调以及订阅源管理的全链路打通；
-- **文案深度人性化**: 彻底消除全站生硬 AI 味，采用温润自然的表达；
-- **Go 后端鉴权兼容与 JSON Tags 补全**: 修复了属性反序列化回退与页面鉴权缺陷；
-- **双架构云端自动化**: GitHub Actions 成功构建 amd64 + arm64 双架构镜像并发布至 Docker Hub 官方镜像库 (`wenxiloveyou/submatrix:latest`)；
-- **Chrome 浏览器双模实机验收**: 本地生产容器平滑部署并通过 Google Chrome 实机拍摄完成纯白与全黑双模验收。
-
-### 组代理与协议过滤架构升级 (2026-11-03)
-- **组级代理穿透 (GroupProxyDialer)**: `GroupConfig` 扩展 `proxy` 字段。通过 Mihomo `adapter.WithDialerForAPI(dialer)` 原生接口注入，支持 HTTP CONNECT 隧道与 SOCKS5 代理拨号，实现单组节点的连通测活、带宽测速与订阅拉取流量 100% 穿透前置代理；
-- **单组协议过滤拦截**: `GroupConfig` 扩展 `filter-protocols` 字段，默认过滤排除 `["http"]` 协议。在节点入库解析（`proxy/proxies.go`）、分发质检（`check/check.go`）与结果落盘（`save/save.go`）全链路拦截，直接排除明文 HTTP 废节点；
-- **节点质检分析报告 (Node Quality Analytics)**: 完整对接 `/api/analysis-report` 与 `output/stats/subs-analysis.yaml`，激活全景执行摘要、4维质检指标（探测总数、可用总数、存活率、流量耗时）、16 国地区分布进度条、协议构成分布与订阅源优劣排行榜；
-- **客户端订阅直链无感鉴权**: `authMiddleware` 支持从 URL Query（`?token=xxx` 与 `?api_key=xxx`）提取凭据，保障客户端复制直链直接拉取带有完整 126 个策略组分流规则的配置。
-
-### 单组独立规则预设与智能联动界面重构 (2026-11-03 终极版)
-- **单组独立规则预设 (RulePreset)**: 扩展 `rule_preset` 字段，支持 5 大预设：`pro_full` (默认最详 126 组 + 流媒体 + AI 分流矩阵)、`pro_lite` (核心轻量)、`acl4ssr` (全量在线规则集)、`direct_pure` (纯节点直通)、`custom` (自定义直链)；
-- **单组订阅直链完整可运行**: `SaveGroupConfig` 在输出单组 `mihomo.yaml` 时自动融合所选规则模板的策略组与规则，并加入 `sanitizeProxyForYAML` 深度自愈外部脏节点（如 `!!binary` 二进制转换异常），确保客户端直接拉取开箱即用；
-- **智能条件显隐联动 (Smart Visibility)**: 彻底消除界面干扰！当单组关闭【连通测活】时，自动收起测速、画像打标、流媒体检测、淘汰丢弃与最低速度门槛等依赖测活的功能，呈现极简透传提示条；开启测活时舒展展现 15+ 项全量控制。
+### 3. Docker 构建与部署
+- 编译镜像自带 `ENV GOPROXY=https://goproxy.cn,direct`，保障国内网络环境下秒级无损下载 Go 依赖；
+- 容器命名：`submatrix-test`，端口：`8199:8199`，持久化挂载宿主机 `output/` 与 `config/` 目录。
