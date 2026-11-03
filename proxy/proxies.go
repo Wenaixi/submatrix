@@ -21,10 +21,10 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/samber/lo"
-	"github.com/sinspired/subs-check-pro/v3/config"
-	"github.com/sinspired/subs-check-pro/v3/proxy/parse"
-	"github.com/sinspired/subs-check-pro/v3/save/method"
-	"github.com/sinspired/subs-check-pro/v3/utils"
+	"github.com/Wenaixi/submatrix/config"
+	"github.com/Wenaixi/submatrix/proxy/parse"
+	"github.com/Wenaixi/submatrix/save/method"
+	"github.com/Wenaixi/submatrix/utils"
 )
 
 type SubUrls struct {

@@ -26,11 +26,11 @@ import (
 	"github.com/metacubex/mihomo/constant"
 	"github.com/oschwald/maxminddb-golang/v2"
 	"github.com/samber/lo"
-	"github.com/sinspired/subs-check-pro/v3/assets"
-	"github.com/sinspired/subs-check-pro/v3/check/platform"
-	"github.com/sinspired/subs-check-pro/v3/config"
-	proxyutils "github.com/sinspired/subs-check-pro/v3/proxy"
-	"github.com/sinspired/subs-check-pro/v3/utils"
+	"github.com/Wenaixi/submatrix/assets"
+	"github.com/Wenaixi/submatrix/check/platform"
+	"github.com/Wenaixi/submatrix/config"
+	proxyutils "github.com/Wenaixi/submatrix/proxy"
+	"github.com/Wenaixi/submatrix/utils"
 )
 
 // 对外暴露变量，兼容GUI调用

@@ -1,4 +1,4 @@
-module github.com/sinspired/subs-check-pro/v3
+module github.com/Wenaixi/submatrix
 
 go 1.27.0
 

@@ -20,10 +20,10 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/robfig/cron/v3"
-	"github.com/sinspired/subs-check-pro/v3/assets"
-	"github.com/sinspired/subs-check-pro/v3/config"
-	"github.com/sinspired/subs-check-pro/v3/save/method"
-	"github.com/sinspired/subs-check-pro/v3/utils"
+	"github.com/Wenaixi/submatrix/assets"
+	"github.com/Wenaixi/submatrix/config"
+	"github.com/Wenaixi/submatrix/save/method"
+	"github.com/Wenaixi/submatrix/utils"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 

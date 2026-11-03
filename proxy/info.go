@@ -14,7 +14,7 @@ import (
 	"github.com/metacubex/mihomo/common/convert"
 	"github.com/oschwald/maxminddb-golang/v2"
 	"github.com/sinspired/checkip/pkg/ipinfo"
-	"github.com/sinspired/subs-check-pro/v3/config"
+	"github.com/Wenaixi/submatrix/config"
 )
 
 var ipAPIs = []string{

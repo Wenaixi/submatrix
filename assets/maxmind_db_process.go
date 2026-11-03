@@ -17,9 +17,9 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/oschwald/maxminddb-golang/v2"
-	"github.com/sinspired/subs-check-pro/v3/config"
-	"github.com/sinspired/subs-check-pro/v3/save/method"
-	"github.com/sinspired/subs-check-pro/v3/utils"
+	"github.com/Wenaixi/submatrix/config"
+	"github.com/Wenaixi/submatrix/save/method"
+	"github.com/Wenaixi/submatrix/utils"
 )
 
 type githubRelease struct {

@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/lmittmann/tint"
-	"github.com/sinspired/subs-check-pro/v3/utils"
+	"github.com/Wenaixi/submatrix/utils"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 

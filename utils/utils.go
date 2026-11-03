@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sinspired/subs-check-pro/v3/config"
+	"github.com/Wenaixi/submatrix/config"
 )
 
 // NormalizeGitHubRawURL 将 GitHub 的 blob/raw 页面链接转换为 raw.githubusercontent.com 直链

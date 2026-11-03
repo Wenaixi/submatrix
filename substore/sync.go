@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
-	"github.com/sinspired/subs-check-pro/v3/config"
-	"github.com/sinspired/subs-check-pro/v3/utils"
-	"github.com/sinspired/subs-check-pro/v3/utils/script"
+	"github.com/Wenaixi/submatrix/config"
+	"github.com/Wenaixi/submatrix/utils"
+	"github.com/Wenaixi/submatrix/utils/script"
 )
 
 // Args 脚本操作参数
