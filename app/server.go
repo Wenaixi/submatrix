@@ -240,9 +240,43 @@ func (app *App) registerStaticRoutes(router *gin.Engine, outputPath string) {
 	}
 	for routePath, fileName := range protectedFiles {
 		// 映射到 outputPath/sub 下的文件
-		authGroup.StaticFile(routePath, filepath.Join(subDir, fileName))
-		// 同时提供 /sub 路径访问
-		authGroup.StaticFile(SubPath+routePath, filepath.Join(subDir, fileName))
+		filePath := filepath.Join(subDir, fileName)
+		if fileName == "mihomo.yaml" {
+			handler := func(c *gin.Context) {
+				data, err := os.ReadFile(filePath)
+				if err != nil {
+					c.String(http.StatusNotFound, "文件不存在")
+					return
+				}
+				host := c.Request.Host
+				if host == "" {
+					host = "127.0.0.1:8199"
+				}
+				token := c.Query("token")
+				if token == "" {
+					token = c.Query("api_key")
+				}
+				proto := "http"
+				if c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https" {
+					proto = "https"
+				}
+				content := string(data)
+				content = strings.ReplaceAll(content, "127.0.0.1:8199", host)
+				if proto == "https" {
+					content = strings.ReplaceAll(content, "http://"+host, "https://"+host)
+				}
+				if token != "" && token != "wenxi-admin" {
+					content = strings.ReplaceAll(content, "token=wenxi-admin", "token="+token)
+				}
+				c.Header("Content-Type", "text/plain; charset=utf-8")
+				c.String(http.StatusOK, content)
+			}
+			authGroup.GET(routePath, handler)
+			authGroup.GET(SubPath+routePath, handler)
+		} else {
+			authGroup.StaticFile(routePath, filePath)
+			authGroup.StaticFile(SubPath+routePath, filePath)
+		}
 	}
 }
 
