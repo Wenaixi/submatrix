@@ -30,15 +30,26 @@ var (
 		re     *regexp.Regexp
 		format string
 	}{
-		{regexp.MustCompile(`(?i)\{ymd\}`), "20060102"},
-		{regexp.MustCompile(`(?i)\{y-m-d\}`), "2006-01-02"},
-		{regexp.MustCompile(`(?i)\{y_m_d\}`), "2006_01_02"},
-		{regexp.MustCompile(`(?i)\{yy\}`), "2006"},
-		{regexp.MustCompile(`(?i)\{y\}`), "2006"},
-		{regexp.MustCompile(`(?i)\{mm\}`), "01"},
-		{regexp.MustCompile(`(?i)\{m\}`), "1"},
-		{regexp.MustCompile(`(?i)\{dd\}`), "02"},
-		{regexp.MustCompile(`(?i)\{d\}`), "2"},
+		// 1. 完整年月日组合格式（长匹配优先）
+		{regexp.MustCompile(`(?i)(\$\{ymd\}|\{ymd\}|\$\{yyyymmdd\}|\{yyyymmdd\}|%Y%m%d|\[yyyymmdd\])`), "20060102"},
+		{regexp.MustCompile(`(?i)(\$\{y-m-d\}|\{y-m-d\}|\$\{yyyy-mm-dd\}|\{yyyy-mm-dd\}|%Y-%m-%d|\[yyyy-mm-dd\])`), "2006-01-02"},
+		{regexp.MustCompile(`(?i)(\$\{y_m_d\}|\{y_m_d\}|\$\{yyyy_mm_dd\}|\{yyyy_mm_dd\}|%Y_%m_%d|\[yyyy_mm_dd\])`), "2006_01_02"},
+		{regexp.MustCompile(`(?i)(\$\{y/m/d\}|\{y/m/d\}|\$\{yyyy/mm/dd\}|\{yyyy/mm/dd\}|%Y/%m/%d|\[yyyy/mm/dd\])`), "2006/01/02"},
+
+		// 2. 四位年份 (2006)
+		{regexp.MustCompile(`(?i)(\$\{yyyy\}|\{yyyy\}|\$\{yy\}|\{yy\}|\$\{y\}|\{y\}|%Y|\[yyyy\])`), "2006"},
+		// 两位年份 (06)
+		{regexp.MustCompile(`(?i)(%y|\[yy\])`), "06"},
+
+		// 3. 两位月份 (01)
+		{regexp.MustCompile(`(?i)(\$\{mm\}|\{mm\}|%m|\[mm\])`), "01"},
+		// 一位月份 (1)
+		{regexp.MustCompile(`(?i)(\$\{m\}|\{m\}|\[m\])`), "1"},
+
+		// 4. 两位日期 (02)
+		{regexp.MustCompile(`(?i)(\$\{dd\}|\{dd\}|%d|\[dd\])`), "02"},
+		// 一位日期 (2)
+		{regexp.MustCompile(`(?i)(\$\{d\}|\{d\}|\[d\])`), "2"},
 	}
 )
 
@@ -821,22 +832,23 @@ func buildCandidateURLs(u string) ([]string, bool) {
 
 func hasDatePlaceholder(s string) bool {
 	ls := strings.ToLower(s)
-	return strings.Contains(ls, "{ymd}") ||
-		strings.Contains(ls, "{y-m-d}") ||
-		strings.Contains(ls, "{y_m_d}") ||
-		strings.Contains(ls, "{yy}") ||
-		strings.Contains(ls, "{y}") ||
-		strings.Contains(ls, "{mm}") ||
-		strings.Contains(ls, "{m}") ||
-		strings.Contains(ls, "{dd}") ||
-		strings.Contains(ls, "{d}")
+	return strings.Contains(ls, "ymd") ||
+		strings.Contains(ls, "yy") ||
+		strings.Contains(ls, "year") ||
+		strings.Contains(ls, "mm") ||
+		strings.Contains(ls, "month") ||
+		strings.Contains(ls, "dd") ||
+		strings.Contains(ls, "day") ||
+		strings.Contains(s, "%Y") ||
+		strings.Contains(s, "%y") ||
+		strings.Contains(s, "%m") ||
+		strings.Contains(s, "%d")
 }
 
 func replaceDatePlaceholders(s string, t time.Time) string {
 	out := s
 	for _, item := range dateRegexes {
-		// 只有当字符串包含 { 时才执行正则，提升极大性能
-		if strings.Contains(out, "{") {
+		if item.re.MatchString(out) {
 			out = item.re.ReplaceAllString(out, t.Format(item.format))
 		}
 	}
