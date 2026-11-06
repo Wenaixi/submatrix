@@ -1,17 +1,17 @@
 # 适配 Glibc 动态链接与 CGO
 FROM golang:1.24-bookworm AS builder
 
-# 安装 CGO 编译工具链
-RUN apt-get update -o Acquire::Check-Valid-Until=false \
-    && apt-get install -y gcc g++ musl-dev \
-    && rm -rf /var/lib/apt/lists/*
+# 安装 CGO 编译工具链（换阿里云源，国内网络）
+RUN apt-get update -o Acquire::Check-Valid-Until=false -o Acquire::http::Timeout=60 -o Acquire::Retries=5 && apt-get install -y gcc g++ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
+ENV HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= ALL_PROXY= all_proxy=
+ENV NO_PROXY=localhost,127.0.0.1
 ENV GOTOOLCHAIN=auto
 ENV GOPROXY=https://goproxy.cn,direct
 
 COPY go.mod go.sum ./
-RUN go mod tidy
+RUN go mod download -x 2>&1 | tail -20; GOTOOLCHAIN=auto go mod download
 COPY . .
 
 RUN CGO_CFLAGS="-Os -g0" CGO_ENABLED=1 \
@@ -29,6 +29,7 @@ COPY --from=builder /usr/share/zoneinfo/Asia/Shanghai /usr/share/zoneinfo/Asia/S
 WORKDIR /app
 ENV TZ=Asia/Shanghai
 ENV RUNNING_IN_DOCKER=true
+ENV HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= ALL_PROXY= all_proxy=
 
 LABEL org.opencontainers.image.title="SubMatrix" \
     org.opencontainers.image.description="高性能订阅拓扑矩阵与检测筛选工具"

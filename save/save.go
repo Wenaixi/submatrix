@@ -597,7 +597,7 @@ func SaveGroupConfig(grp config.ResolvedGroupConfig, results []check.Result) {
 // 而 HistoryPool 始终保留归属字段，因此以它为唯一数据源。
 // 返回每个组写入的节点数量。
 func SplitResultsByGroupFromPool(pool []map[string]any) map[string]int {
-	groups := config.ResolveAllGroups(config.GlobalConfig)
+	groups := config.ResolveAllGroups(*config.GlobalConfig)
 	out := make(map[string]int)
 	for _, grp := range groups {
 		if !grp.Enabled {
@@ -641,7 +641,7 @@ func SplitResultsByGroupFromPool(pool []map[string]any) map[string]int {
 // 注意：必须在 check.CleanupMetadata 之前调用（或传入保留元数据的历史副本），
 // 否则 sub_url / sub_tag 已被剥离，组归属信息丢失。
 func SplitResultsByGroup(results []check.Result) map[string]int {
-	groups := config.ResolveAllGroups(config.GlobalConfig)
+	groups := config.ResolveAllGroups(*config.GlobalConfig)
 	out := make(map[string]int)
 	for _, grp := range groups {
 		if !grp.Enabled {
