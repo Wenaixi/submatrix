@@ -592,3 +592,33 @@ func SaveGroupConfig(grp config.ResolvedGroupConfig, results []check.Result) {
 	}
 }
 
+// SplitResultsByGroup 将一次全局检测的结果按节点归属切分到各个启用的组。
+// 每个节点依据其 sub_tag / sub_url 匹配唯一组；未匹配的节点归入全局结果，不重复落盘。
+// 返回每个组写入的节点数量，供日志与 CLI 展示。
+func SplitResultsByGroup(results []check.Result) map[string]int {
+	groups := config.ResolveAllGroups(config.GlobalConfig)
+	out := make(map[string]int)
+	for _, grp := range groups {
+		if !grp.Enabled {
+			continue
+		}
+		var grpResults []check.Result
+		for _, r := range results {
+			if r.Proxy == nil {
+				continue
+			}
+			tag, _ := r.Proxy["sub_tag"].(string)
+			subURL, _ := r.Proxy["sub_url"].(string)
+			if grp.MatchesNode(tag, subURL) {
+				grpResults = append(grpResults, r)
+			}
+		}
+		if len(grpResults) == 0 {
+			continue
+		}
+		SaveGroupConfig(grp, grpResults)
+		out[grp.Name] = len(grpResults)
+	}
+	return out
+}
+

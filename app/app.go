@@ -403,6 +403,13 @@ func (app *App) checkProxies() error {
 	check.CurrentStepName.Store("保存配置")
 	save.SaveConfig(results, historyNodes)
 
+	// 按组切分：把全局检测结果按节点归属分发到各启用的组，每组独立落盘
+	if counts := save.SplitResultsByGroup(results); len(counts) > 0 {
+		for grpName, n := range counts {
+			slog.Info("组订阅已落盘", "组", grpName, "节点数", n)
+		}
+	}
+
 	check.CurrentStepName.Store("更新订阅")
 	utils.UpdateSubs()
 
