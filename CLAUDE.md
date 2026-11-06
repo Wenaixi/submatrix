@@ -27,3 +27,27 @@
 ### 3. Docker 构建与部署
 - 编译镜像自带 `ENV GOPROXY=https://goproxy.cn,direct`，保障国内网络环境下秒级无损下载 Go 依赖；
 - 容器命名：`submatrix-test`，端口：`8199:8199`，持久化挂载宿主机 `output/` 与 `config/` 目录。
+
+## 4. 按组切分与无头 CLI（2026-11-07）
+
+### 组功能现状与决策
+- 早期提交 0343058 曾实现「按组独立流水线」（ExecuteGroupProxies + SaveGroupConfig 调用链），
+  同日的 f2109d6 以 sinspired 为基座重构时整段删除，`SaveGroupConfig` 成为零调用孤儿函数。
+- 已恢复的形态：**全局检测一次 + 按组切分落盘**。切分数据源必须是 `historyNodes`
+  （保留完整 sub_url/sub_tag），`results` 在 `check.CleanupMetadata()` 已被剥离归属字段。
+- `SaveGroupConfig` 依赖 check.Result；`SplitResultsByGroupFromPool` 直接吃 map 池，
+  两者复用 `writeGroupYAML` 落盘（groups/<name>/all.yaml + 按 rule-preset 融合 mihomo.yaml）。
+
+### 命名修复（核心三处）
+- `updateProxyName`（check/check.go）else 分支不再无条件拼接原始名，
+  未知地区统一 `Rename("","")` → 占位旗 + 序号，杜绝 🏴☠_1D🔴... 滚雪球。
+- `config/group.go` 新增 `MatchesNode`：按 sub_tag/sub_url 判定节点归属组。
+- 诊断结论：`append-original-name` / `tag-ip-type` / `node-prefix` 在代码里无消费点（上游行为）；
+  `enhanced-tag` 默认开，但当前 config.yaml 缺该键（示例配置有，值为 true）。
+
+### CLI subctl（cmd/subctl/）
+- 命令：`validate` / `get <路径>` / `set <路径> <值>` / `groups list|toggle` / `presets`。
+- 路径语法：点号 + 切片下标，如 `subctl get groups.0.name`；
+  `set` 支持 bool/int/string/逗号分隔 []string/YAML 片段。
+- 依赖：新增 `github.com/urfave/cli/v2`（v2.27.5）。
+- 用途：容器/服务器/无浏览器环境下精确读写配置，替代 WebUI 操作。
