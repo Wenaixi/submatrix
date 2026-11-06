@@ -25,6 +25,7 @@ require (
 	github.com/samber/lo v1.53.0
 	github.com/sinspired/checkip v0.5.6
 	github.com/sinspired/subs-check-pro-webui v1.8.2
+	github.com/urfave/cli/v2 v2.27.5
 	github.com/wailsapp/wails/v3 v3.0.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
@@ -49,6 +50,7 @@ require (
 	github.com/cloudwego/base64x v0.1.7 // indirect
 	github.com/coder/websocket v1.8.15 // indirect
 	github.com/coreos/go-iptables v0.8.0 // indirect
+	github.com/cpuguy83/go-md2man/v2 v2.0.5 // indirect
 	github.com/davidmz/go-pageant v1.0.2 // indirect
 	github.com/dlclark/regexp2 v1.12.0 // indirect
 	github.com/dunglas/httpsfv v1.1.2 // indirect
@@ -162,6 +164,7 @@ require (
 	github.com/quic-go/quic-go v0.64.1 // indirect
 	github.com/rasky/go-lzo v0.0.0-20261012164727-ad21c35a1111 // indirect
 	github.com/rs/xid v1.6.0 // indirect
+	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/safchain/ethtool v0.7.0 // indirect
 	github.com/sagernet/netlink v0.0.0-20260919000536-5d76abd97cf7 // indirect
 	github.com/sina-ghaderi/poly1305 v0.0.0-20220724002748-c5926b03988b // indirect
@@ -183,6 +186,7 @@ require (
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
+	github.com/xrash/smetrics v0.0.0-20240521201337-686a1a2994c1 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	github.com/zlsgo/useragent v0.0.0-20251119103354-4ad4f1fe3b88 // indirect
