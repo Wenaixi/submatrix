@@ -592,9 +592,54 @@ func SaveGroupConfig(grp config.ResolvedGroupConfig, results []check.Result) {
 	}
 }
 
+// SplitResultsByGroupFromPool 从历史节点池（保留完整 sub_url/sub_tag 元数据）按组切分落盘。
+// 检测流程在 CleanupMetadata 剥离元数据后 results 不可再用于归属判定，
+// 而 HistoryPool 始终保留归属字段，因此以它为唯一数据源。
+// 返回每个组写入的节点数量。
+func SplitResultsByGroupFromPool(pool []map[string]any) map[string]int {
+	groups := config.ResolveAllGroups(config.GlobalConfig)
+	out := make(map[string]int)
+	for _, grp := range groups {
+		if !grp.Enabled {
+			continue
+		}
+		var grpProxies []map[string]any
+		for _, p := range pool {
+			if p == nil {
+				continue
+			}
+			tag, _ := p["sub_tag"].(string)
+			subURL, _ := p["sub_url"].(string)
+			if grp.MatchesNode(tag, subURL) {
+				grpProxies = append(grpProxies, p)
+			}
+		}
+		if len(grpProxies) == 0 {
+			continue
+		}
+		proxiesList := make([]map[string]any, 0, len(grpProxies))
+		for _, p := range grpProxies {
+			typ := strings.ToLower(fmt.Sprintf("%v", p["type"]))
+			if grp.MatchesProtocol(typ) {
+				continue
+			}
+			proxiesList = append(proxiesList, sanitizeProxyForYAML(p))
+		}
+		if len(proxiesList) == 0 {
+			continue
+		}
+		writeGroupYAML(grp, proxiesList)
+		out[grp.Name] = len(proxiesList)
+	}
+	return out
+}
+
 // SplitResultsByGroup 将一次全局检测的结果按节点归属切分到各个启用的组。
 // 每个节点依据其 sub_tag / sub_url 匹配唯一组；未匹配的节点归入全局结果，不重复落盘。
 // 返回每个组写入的节点数量，供日志与 CLI 展示。
+//
+// 注意：必须在 check.CleanupMetadata 之前调用（或传入保留元数据的历史副本），
+// 否则 sub_url / sub_tag 已被剥离，组归属信息丢失。
 func SplitResultsByGroup(results []check.Result) map[string]int {
 	groups := config.ResolveAllGroups(config.GlobalConfig)
 	out := make(map[string]int)
@@ -620,5 +665,43 @@ func SplitResultsByGroup(results []check.Result) map[string]int {
 		out[grp.Name] = len(grpResults)
 	}
 	return out
+}
+
+// writeGroupYAML 把一组节点写入 groups/<name>/all.yaml 与 mihomo.yaml（按规则预设融合）。
+func writeGroupYAML(grp config.ResolvedGroupConfig, proxiesList []map[string]any) {
+	saver, err := method.NewLocalSaver()
+	if err != nil {
+		slog.Error("获取保存目录失败", "err", err)
+		return
+	}
+
+	groupDir := filepath.Join(saver.OutputPath, "groups", grp.Name)
+	if err := os.MkdirAll(groupDir, 0755); err != nil {
+		slog.Error("创建组输出目录失败", "dir", groupDir, "err", err)
+		return
+	}
+
+	// 单组节点保留数量上限拦截
+	if grp.SuccessLimit > 0 && len(proxiesList) > int(grp.SuccessLimit) {
+		proxiesList = proxiesList[:grp.SuccessLimit]
+	}
+
+	allYamlData, err := yaml.Marshal(map[string]any{"proxies": proxiesList})
+	if err == nil {
+		_ = os.WriteFile(filepath.Join(groupDir, "all.yaml"), allYamlData, 0644)
+	}
+
+	if grp.RulePreset == config.RulePresetDirectPure {
+		_ = os.WriteFile(filepath.Join(groupDir, "mihomo.yaml"), allYamlData, 0644)
+		return
+	}
+
+	mihomoData, err := buildGroupMihomoYAML(grp, proxiesList)
+	if err == nil && len(mihomoData) > 0 {
+		_ = os.WriteFile(filepath.Join(groupDir, "mihomo.yaml"), mihomoData, 0644)
+	} else if err == nil {
+		slog.Warn("合并组规则模板失败，降级保存纯节点", "group", grp.Name, "err", err)
+		_ = os.WriteFile(filepath.Join(groupDir, "mihomo.yaml"), allYamlData, 0644)
+	}
 }
 
