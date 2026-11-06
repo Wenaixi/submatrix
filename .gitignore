@@ -53,3 +53,6 @@ config/cache/
 
 !webui/static/dist/
 !webui/static/dist/*
+
+# 本地构建产物
+.local/
