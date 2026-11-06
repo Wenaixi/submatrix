@@ -70,6 +70,29 @@ func (r ResolvedGroupConfig) MatchesProtocol(protocol string) bool {
 	return false
 }
 
+// MatchesNode 判断某个节点是否归属本组。
+//
+// 判定依据是节点从订阅解析时留下的元数据：
+//   - sub_tag：订阅 URL 的 #fragment，优先匹配组的 Tag / Name / DisplayName
+//   - sub_url：节点来源订阅地址，匹配组配置里列出的 URLs
+//
+// 两个依据都没有时返回 false，避免把无归属节点划进任意组。
+func (r ResolvedGroupConfig) MatchesNode(tag, subURL string) bool {
+	if tag != "" {
+		if r.Tag == tag || r.Name == tag || r.DisplayName == tag {
+			return true
+		}
+	}
+	if subURL != "" {
+		for _, u := range r.URLs {
+			if u == subURL {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // ResolveGroup 将单组配置与全局配置级联合并
 func ResolveGroup(g GroupConfig, global Config) ResolvedGroupConfig {
 	enabled := true
