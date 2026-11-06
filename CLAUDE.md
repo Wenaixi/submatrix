@@ -51,3 +51,15 @@
   `set` 支持 bool/int/string/逗号分隔 []string/YAML 片段。
 - 依赖：新增 `github.com/urfave/cli/v2`（v2.27.5）。
 - 用途：容器/服务器/无浏览器环境下精确读写配置，替代 WebUI 操作。
+
+### Docker 构建坑（2026-11-07 实测，7 次失败总结）
+- `daemon.json` 的 `proxies` 段通过 **build-arg**（非 ENV）注入构建容器，
+  优先级高于 Dockerfile 的 ENV 清空；容器内 127.0.0.1 是容器自己，代理必连不上。
+  解法：`docker build --build-arg HTTP_PROXY= --build-arg HTTPS_PROXY= --build-arg http_proxy= --build-arg https_proxy= --build-arg ALL_PROXY= --build-arg all_proxy= `
+- `go.mod` 要求 go 1.27，本地缓存基础镜像只有 golang:1.24 → 必须 `ENV GOTOOLCHAIN=auto`
+  （且改 Dockerfile 全程留意别误删此行）。
+- apt 换源：`sed -i s|deb.debian.org|mirrors.aliyun.com|g /etc/apt/sources.list.d/debian.sources`，
+  musl-dev 在 bookworm 无候选，不要装。
+- 容器 API 健康检查必须 `curl --noproxy "*"`：本机系统代理（Clash 10801）会把
+  回环请求也代理掉，产生假 502。
+- 新镜像验证三件套：容器日志「组订阅已落盘」行 + `output/groups/*/all.yaml` 时间戳 + 节点名抽查。
