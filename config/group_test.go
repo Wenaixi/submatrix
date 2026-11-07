@@ -70,3 +70,28 @@ func TestResolveAllGroups_DefaultAndProtocols(t *testing.T) {
 		t.Errorf("expected custom-b fallback RulePreset pro_full, got %s", gb.RulePreset)
 	}
 }
+
+func TestResolveAllGroupsSortsByPriority(t *testing.T) {
+	g := Config{
+		Groups: []GroupConfig{
+			{Name: "b", URLs: []string{"https://b"}, Priority: 20},
+			{Name: "a", URLs: []string{"https://a"}, Priority: 10},
+			{Name: "c", URLs: []string{"https://c"}, Priority: 10}, // 同 10，应保持声明顺序
+		},
+	}
+	got := ResolveAllGroups(g)
+	want := []string{"a", "c", "b"}
+	for i, w := range want {
+		if got[i].Name != w {
+			t.Fatalf("ResolveAllGroups 排序错: got[%d]=%s want %s (全序 %v)", i, got[i].Name, w, names(got))
+		}
+	}
+}
+
+func names(gs []ResolvedGroupConfig) []string {
+	out := make([]string, len(gs))
+	for i, g := range gs {
+		out[i] = g.Name
+	}
+	return out
+}

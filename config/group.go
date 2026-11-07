@@ -1,6 +1,9 @@
 package config
 
-import "strings"
+import (
+	"sort"
+	"strings"
+)
 
 // 规则集预设标识符定义
 const (
@@ -33,6 +36,7 @@ type GroupConfig struct {
 	FilterProtocols    []string `json:"filter_protocols" yaml:"filter-protocols"`
 	SuccessLimit       *int32   `json:"success_limit" yaml:"success-limit"`
 	DownloadMB         *int     `json:"download_mb" yaml:"download-mb"`
+	Priority           int      `json:"priority" yaml:"priority,omitempty"`
 }
 
 // ResolvedGroupConfig 级联继承全局配置后的最终可执行组配置
@@ -57,6 +61,7 @@ type ResolvedGroupConfig struct {
 	FilterProtocols    []string
 	SuccessLimit       int32
 	DownloadMB         int
+	Priority           int
 }
 
 // MatchesProtocol 检查指定协议是否属于本组配置过滤排除的协议
@@ -120,6 +125,7 @@ func ResolveGroup(g GroupConfig, global Config) ResolvedGroupConfig {
 		MinSpeed:           global.MinSpeed,
 		MediaCheck:         global.MediaCheck,
 		TagIPType:          global.TagIPType,
+		Priority:           g.Priority,
 		RenameNode:         global.RenameNode,
 		AppendOriginalName: global.AppendOriginalName,
 		DropOnFail:         true,
@@ -206,7 +212,20 @@ func ResolveAllGroups(global Config) []ResolvedGroupConfig {
 	for _, g := range global.Groups {
 		res = append(res, ResolveGroup(g, global))
 	}
+	sortResolvedGroups(res)
 	return res
+}
+
+// sortResolvedGroups 按 Priority 升序稳定排序（priority 相同保持配置声明顺序）。
+func sortResolvedGroups(groups []ResolvedGroupConfig) {
+	sort.SliceStable(groups, func(i, j int) bool {
+		return groups[i].Priority < groups[j].Priority
+	})
+}
+
+// SortGroupsByPriority 对外导出的排序入口（供 CLI/前端预览使用）。
+func SortGroupsByPriority(groups []ResolvedGroupConfig) {
+	sortResolvedGroups(groups)
 }
 
 func resolveTimeout(t int) int {

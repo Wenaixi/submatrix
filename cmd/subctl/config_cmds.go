@@ -152,8 +152,8 @@ var groupsCmd = &cli.Command{
 					if rule == "" {
 						rule = "pro_full"
 					}
-					fmt.Printf("[%d] %s (%s) %s | 测活=%v 测速=%v 规则=%s URL数=%d\n",
-						i, g.Name, g.DisplayName, state,
+					fmt.Printf("[%d] %s (%s) %s | 优先级=%d 测活=%v 测速=%v 规则=%s URL数=%d\n",
+						i, g.Name, g.DisplayName, state, g.Priority,
 						groupBool(g.CheckAlive, true), groupBool(g.CheckSpeed, true),
 						rule, len(g.URLs),
 					)
