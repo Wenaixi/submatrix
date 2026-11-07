@@ -1,0 +1,9 @@
+# B 站 / 抖音等 PCDN 节点屏蔽规则（REJECT）
+# PCDN（Peer CDN）会把用户上行宽带当 CDN 共享，抢占上传、增加延迟、可能触发运营商封禁。
+# 本文件为 rule-provider 素材（behavior: domain），由 126 组模板的 BlockPCDN provider 引用。
+payload:
+  - '+.*.pcdn*.biliapi.net'
+  - '+.mcdn.bilivideo.cn'
+  - '+.mcdn.bilivideo.com'
+  - '+.szbdyd.com'
+  - '+.mountaintoys.cn'

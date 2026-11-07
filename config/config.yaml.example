@@ -1,3 +1,50 @@
+# -----------分组配置（核心）-----------
+# 每个组独立拉取自己的 URLs、独立检测、独立落盘到 output/groups/<name>/
+# 组间按 priority 从小到大串行执行；priority 相同的组按声明顺序
+# 每个组的产物：all.yaml(已检测) / all-raw.yaml(全量含skipped) / mihomo.yaml(融合规则) / history.yaml
+groups:
+  # ---- 普通组：直连远程订阅 ----
+  - name: free-a                 # 组名（仅允许字母/数字/下划线/连字符，参与文件路径）
+    display-name: 公网免费 A 组    # 显示名称
+    tag: 免费A                    # 节点标签后缀
+    enabled: true                # 是否启用
+    priority: 10                 # 执行优先级：越小越先执行
+    check-alive: true            # 是否测活（false = 免检直通，全部放行）
+    check-speed: true            # 是否测速
+    min-speed: 0                 # 最低测速门槛（KB/s），0 = 不限制
+    media-check: false           # 是否检测流媒体解锁
+    rename-node: true            # 是否按 IP 地区重命名节点
+    drop-on-fail: true           # 检测失败是否淘汰
+    rule-preset: pro_full        # 规则集预设：pro_full/pro_lite/acl4ssr/direct_pure/custom
+    overwrite-url: ""            # rule-preset=custom 时的自定义模板地址
+    timeout: 3000                # 单节点超时（毫秒）
+    success-limit: 0             # 本组最多保留节点数，0 = 不限制
+    download-mb: 10              # 测速下载上限（MB）
+    proxy: ""                    # 本组测活测速走的前置代理（如 http://127.0.0.1:7890）
+    # 协议过滤：命中的协议不参与检测，但仍落盘到 all-raw.yaml
+    # 默认过滤 http 明文协议；置空 [] 则全部节点都检测
+    filter-protocols:
+      - http
+    urls:
+      - https://example.com/subscription/clash.yaml
+      - https://another.example.com/nodes.yaml
+
+  # ---- 聚合组：引用其他组的产物（相对路径，自动展开为公网地址）----
+  - name: all-in-one
+    display-name: 全量聚合组
+    tag: 聚合
+    enabled: true
+    priority: 900               # 放最后，确保前面的组已落盘
+    check-alive: false          # 聚合组通常免检，直接透传
+    check-speed: false
+    rule-preset: pro_full
+    filter-protocols: []
+    urls:
+      # 相对路径 = 系统内引用，自动展开为 https://<public-url>/group/<name>/all.yaml?token=<api-key>
+      # 注意：必须配置 public-url，否则该组会报错跳过（防止回环引用）
+      - /group/free-a/all.yaml
+      - /group/free-b/all.yaml
+
 # -----------进度显示-----------
 # 是否显示检测进度（终端）
 print-progress: false
@@ -142,6 +189,12 @@ update-timeout: 10
 # 例如:  http://127.0.0.1:8199/more/很多节点.yaml
 # 或设置 share-password 分享订阅
 listen-port: ':8199'
+# 公网访问地址（https:// 开头，不含尾部斜杠）
+# 用途：
+#   1. 组间相对路径引用自动展开为 https://<public-url>/group/<name>/all.yaml
+#   2. 生成订阅直链时作为基准地址
+# 留空时组间相对路径引用会报错跳过（防止回环）
+public-url: ''
 # 是否启用Web控制面板
 # 如果为false，则不启动Web控制界面，仅启动订阅服务相关接口
 # 访问地址：http://127.0.0.1:8199/admin

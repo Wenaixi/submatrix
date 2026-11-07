@@ -1,309 +1,196 @@
-<!-- 项目logo -->
-<p align="center">
-<a href="https://sinspired.github.io/subs-check-pro/"><img src="https://raw.githubusercontent.com/sinspired/subs-check-pro/main/doc/logo/logo.png" alt="Project Logo" width="200"/></a>
-</p>
-<h1 align="center">Subs-Check⁺ PRO</h1>
-<p align="center" color="#6a737d">
-High-performance proxy subscription checker.
-</p>
-<p align="center">
-<a href="https://github.com/sinspired/subs-check-pro/releases"><img src="https://img.shields.io/github/v/release/sinspired/subs-check-pro?logo=github&include_prereleases"/></a>
-<a href="https://hub.docker.com/r/sinspired/subs-check-pro"><img src="https://img.shields.io/docker/pulls/sinspired/subs-check-pro?logo=docker" /></a>
-<a href="https://ghcr.io/sinspired/subs-check-pro"><img src="https://img.shields.io/badge/ghcr.io-online-blue?logo=github"/></a>
-<a href="https://sinspired.github.io/subs-check-pro/"><img alt="doc-site" src="https://img.shields.io/website?url=https%3A%2F%2Fsinspired.github.io%2Fsubs-check-pro%2F&up_message=online&down_message=offline&down_color=red&logo=docusaurus&label=%E6%96%87%E6%A1%A3" /></a>
-<a href="https://github.com/sinspired/subs-check-pro/wiki"><img alt="Wiki" src="https://img.shields.io/badge/Wiki-docs-blue?logo=github" /></a>
-<a href="https://github.com/sinspired/subs-free"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/sinspired/subs-free?include_prereleases&display_name=release&style=flat&logo=wails&logoColor=E2434B&label=%E8%B7%A8%E5%B9%B3%E5%8F%B0%E7%8E%B0%E4%BB%A3GUI" /></a>
-</p>
+# SubMatrix
 
-# 🚀 网络代理质量检测工具
+高性能订阅拓扑矩阵与节点检测管理工具。按组独立检测、串行按优先级执行、每个组的订阅产物独立分发，内置 WebUI 与无头 CLI。
 
-**测活、测速、媒体解锁**，网络质量检测工具。采用全新设计，适配 PC 和手机设备的现代 WebUI 配置管理界面，自动生成 `mihomo` 和 `sing-box` 订阅，集成 `sub-store` 前端和后端，支持一键复制分享，可在高并发运行时保持低内存占用；支持自动无缝版本更新。
+基于 Go 与 React 构建，单二进制部署，适配云端、路由器与桌面环境。
 
-同时也提供了基于 **Wails v3** 现代化框架开发的跨平台本地图形界面客户端 [subs-free](https://github.com/sinspired/subs-free)，已支持 `Android 手机` 和 `Windows` `Linux` `Mac`。
+---
 
-![preview](./doc/images/Subs-Check-PRO_OG.png)
+## 特性
 
-## ✨ 特性
+- **按组独立检测**：每个组配置自己的订阅源、检测参数、规则预设，组间串行按 `priority` 执行
+- **组级优先级**：`priority` 小→大串行；优先级相同的组按配置声明顺序
+- **节点过滤双轨制**：`filter-protocols` 命中的节点不参与检测，但**仍然落盘**（`all-raw.yaml`）——取消过滤即瞬间恢复全部节点
+- **凭证指纹去重**：`type + server + port + 凭证 + TLS` 全字段指纹，同 IP 不同账号的节点都会保留
+- **组间引用**：组 URL 支持相对路径（`/group/<name>/all.yaml`），自动展开为公网域名，杜绝回环地址
+- **规则集预设**：内置 5 档预设，默认使用 126 策略组最详分流模板（含流媒体/AI 全分流）
+- **按组落盘**：每组独立生成 `all.yaml`（已检测）/ `all-raw.yaml`（全量原始）/ `mihomo.yaml`（融合规则）/ `history.yaml`（历史评分）
+- **现代 WebUI**：设置表单、分组拖拽排序、检测报告、文件管理、日志查看
+- **无头 CLI**：`subctl` 命令行精确读写配置，适合容器/服务器场景
+- **内置 Sub-Store**：订阅管理、合成、分享码，与主服务单端口整合
+- **增强位置标签**：`HK²`（非CF直连）/ `HK¹⁺`（CF同区）/ `HK¹-US⁰`（CF跨区）
 
-- [x] ⚡ [自适应流水线高并发模式](https://github.com/sinspired/subs-check-pro/wiki/Features-Details)
-- [x] 🗺️ [增强位置标签](https://github.com/sinspired/subs-check-pro/wiki/Features-Details)
-- [x] 🎲 [智能节点乱序](https://github.com/sinspired/subs-check-pro/wiki/Features-Details)
-- [x] 🕒 [保存并加载历次可用节点](https://github.com/sinspired/subs-check-pro/wiki/Features-Details)
-- [x] 📊 [统计订阅链接总数、可用节点数量、成功率](https://github.com/sinspired/subs-check-pro/wiki/Features-Details)
-- [x] 🚦 [自动检测本地代理环境](https://github.com/sinspired/subs-check-pro/wiki/System-Proxy)
-- [x] 🎁 [自动检查更新，无缝升级新版本](https://github.com/sinspired/subs-check-pro/wiki/Features-Details)
-- [x] 📦 [自动生成开箱即用的 sing-box 配置](https://github.com/sinspired/subs-check-pro/wiki/Subscriptions)
-- [x] 🔒 [优化文件分享，支持分享码](https://github.com/sinspired/subs-check-pro/wiki/File-Service)
-- [x] 📣 [消息通知：节点状态/版本更新/GeoDB 更新](https://github.com/sinspired/subs-check-pro/wiki/Notifications)
-- [x] 🔋 [优化内存占用](https://github.com/sinspired/subs-check-pro/wiki/Features-Details)
-- [x] ♾️ 支持检测百万-千万量级的节点库，依然保持较低的内存占用
-- [x] 💻 支持 `Windows` `Linux` `macOS` 多平台部署
-- [x] 📱 支持 `Android` 手机 APP
-- [x] 🐳 支持 `docker` 部署
-- [x] 🖥️ **全新跨平台现代桌面客户端**：可搭配基于 Wails v3 开发的 [subs-free](https://github.com/sinspired/subs-free) 完美实现本地图形化免命令操控（支持 Windows, macOS, Linux）
-- [x] 📱 全新设计的 WebUI 管理界面，优化小屏设备访问体验
-- [x] ✏️ 升级配置编辑器，支持自动补全与高亮，内置预览与配置分析，GUI 式编辑
-- [x] 🧩 集成 `sub-store` 前端，WebUI 一键管理
-- [x] 6️⃣ 支持 `IPv6` 代理节点
-- [x] 🔗 适配多种非标订阅格式，提高获取订阅成功率
-- [x] 📡 支持检测 `isp` 类型、`原生/广播IP`、住宅/机房
-- [x] 📂 内置文件管理页面（`/files`），方便查看与下载生成文件
-- [x] 📈 检测结果分析报告（`/analysis`），含地理位置与协议分布可视化
-- [ ] 🚧 本项目现接受 issue 反馈
+## 快速开始
 
-### 📖 教程（Wiki）
+### 二进制运行
 
-- 🐳 [Docker 部署](https://github.com/sinspired/subs-check-pro/wiki/Deployment#docker-运行)
-- 🔁 [WatchTower 自动更新与通知](https://github.com/sinspired/subs-check-pro/wiki/Deployment#使用-watchtower-自动更新并通知)
-- 📘 [Cloudflare Tunnel 外网访问](https://github.com/sinspired/subs-check-pro/wiki/Cloudflare-Tunnel)
-- 📗 [通知渠道配置（Apprise）](https://github.com/sinspired/subs-check-pro/wiki/Notifications)
-- 📙 [订阅使用方法](https://github.com/sinspired/subs-check-pro/wiki/Subscriptions)
-- 📕 [内置文件服务](https://github.com/sinspired/subs-check-pro/wiki/File-Service)
-- 📖 [自建GitHub代理（支持提高api速率和gist加速）](https://github.com/sinspired/CF-Proxy)
+下载 Releases 中适合平台的版本，解压后直接运行：
 
-### 📣 使用交流，功能讨论，issue 反馈，新版本通知
-
-- > Telegram 群组：[subs-check性能版](https://t.me/subs_check_pro)⁠
-- > Telegram 频道：[关注频道](https://t.me/sinspired_ai)⁠
-
-> [!TIP]
->
-> 功能更新频繁，请务必查看最新的 [配置文件示例](https://github.com/sinspired/subs-check-pro/blob/main/config/config.yaml.example) 以获取最新功能支持。
-
-> [!NOTE]
-> 查看新增功能及设置方法： [新增功能与性能优化详情](https://github.com/sinspired/subs-check-pro/wiki/Features-Details)
-
-## 📸 预览
-
-![preview](./doc/images/preview.png)
-![result](./doc/images/results.png)
-
-### ✨ 现代 WebUI 管理界面
-
-`http://localhost:8199/admin`
-
-![login](./doc/images/login.png)
-![WebUI](./doc/images/WebUI.png)
-
-### 🖥️ [subs-free](https://github.com/sinspired/subs-free) 跨平台客户端
-
-已支持 `Android 手机` 和 `Windows` `Linux` `Mac`。
-
-#### 💻 桌面端
-
-![preview](./doc/images/GUI.png)
-
-#### 📱 手机 APP
-
-| 正常版                               | Lite 版                                        |
-| ------------------------------------ | ---------------------------------------------- |
-| ![Android](./doc/images/Android.png) | ![Android_Lite](./doc/images/Android_Lite.png) |
-
-➡️ 立即前往体验：[subs-free 仓库](https://github.com/sinspired/subs-free)
-
-### 📊 检测结果分析报告
-
-`http://localhost:8199/analysis`
-
-![analysis](./doc/images/analysis.png)
-
-### ⚡ 自动生成 singbox 订阅，支持一键分享
-
-|                                          |                                           |                                       |
-| ---------------------------------------- | ----------------------------------------- | ------------------------------------- |
-| ![sub-store](./doc/images/sub-store.png) | ![shareMenu](./doc/images/share-menu.png) | ![singbox](./doc/images/sing-box.png) |
-
-|                                  |                                        |
-| -------------------------------- | -------------------------------------- |
-| ![tgram](./doc/images/tgram.png) | ![dingtalk](./doc/images/dingtalk.png) |
-
-## 🛠️ 快速开始
-
-> 首次运行会在当前目录生成默认配置文件。完整安装与部署见 Wiki：
-> [安装与部署](https://github.com/sinspired/subs-check-pro/wiki/Deployment)
-
-### 💻 桌面端 UI 运行（推荐）
-
-直接前往 [subs-free](https://github.com/sinspired/subs-free) 下载适配你当前系统（Windows / macOS / Linux）的安装包，开箱即用，无须配置复杂的命令行参数。
-
-### 🌏 WebUI 控制面板
-
-WebUI 集成了配置编辑、订阅分享、订阅管理，内置文件服务，检测结果分析报告，日志查看等功能，请务必使用 WebUI 作为主要管理入口
-
-请主动修改 `config.yaml` `api-key` 作为 WebUI 访问密码，如未设置，请查看终端日志获取 `api-key`
-
-浏览器输入 `http://localhost:8199/admin` 或 `http://127.0.0.1:8199/admin` 访问 WebUI
-
-注意 `8199` 为默认监听端口，如已修改，请替换为实际端口
-
-### 📦 二进制文件运行
-
-下载 Releases 中适合的版本，解压后直接运行：
-
-```powershell
-./subs-check-pro.exe -f ./config/config.yaml
+```bash
+./submatrix -f ./config/config.yaml
 ```
 
-记录 `api-key`，访问 WebUi
+首次运行会生成默认配置。记录终端输出的 `api-key`，访问 WebUI。
 
-`http://localhost:8199/admin`
-
-### 🐳 Docker 运行（最简）
+### Docker 运行
 
 ```bash
 docker run -d \
-  --name subs-check-pro \
-  -p 8299:8299 \
+  --name submatrix \
   -p 8199:8199 \
   -v ./config:/app/config \
   -v ./output:/app/output \
   --restart always \
-  ghcr.io/sinspired/subs-check-pro:latest
+  wenxiloveyou/submatrix:latest
 ```
 
-💡 记录 `api-key`，访问 WebUi
+### WebUI 控制面板
 
-`http://localhost:8199/admin`
+浏览器访问 `http://localhost:8199/admin`，输入 `api-key` 登录。
 
-> 代理设置见 Wiki：[系统与 GitHub 代理](https://github.com/sinspired/subs-check-pro/wiki/System-Proxy)
->
-> 自建测速地址：[Speedtest](https://github.com/sinspired/subs-check-pro/wiki/Speedtest)
+默认端口 `8199`，如已修改请以实际为准。
 
-### 🪜 优化系统代理和 GitHub 代理设置（可选）
+## 核心概念
 
-可使用网上公开的github proxy 或使用 GitHub 项目 [CF-Proxy](https://github.com/sinspired/CF-Proxy) 自建 GitHub 代理
+### 组（Group）
 
-<details>
-  <summary>展开查看</summary>
+组是 SubMatrix 的基本执行单元：一组订阅源 + 一组检测参数 + 一组规则预设。组配置写在 `config.yaml` 的 `groups` 段：
 
 ```yaml
-# 优先级 1.system-proxy;2.github-proxy;3.ghproxy-group
-# 即使未设置,也会检测常见端口(v2ray\clash)的系统代理自动设置
-
-# 系统代理设置: 适用于拉取订阅、消息推送、文件上传等等。
-# 写法跟环境变量一样，修改需重启生效
-# system-proxy: "http://username:password@192.168.1.1:7890"
-# system-proxy: "socks5://username:password@192.168.1.1:7890"
-system-proxy: ''
-# Github 代理：获取订阅使用
-# github-proxy: "https://ghfast.top/"
-github-proxy: ''
-# GitHub 代理列表：程序会自动筛选可用的 GitHub 代理
-ghproxy-group:
-# - https://ghp.yeye.f5.si/
-# - https://git.llvho.com/
-# - https://hub.885666.xyz/
-# - https://p.jackyu.cn/
-# - https://github.cnxiaobai.com/
+groups:
+  - name: free-a
+    display-name: 公网免费 A 组
+    priority: 10          # 越小越先执行
+    check-speed: true     # 是否测速
+    min-speed: 0          # 最低测速门槛（KB/s，0 不限制）
+    rule-preset: pro_full # 规则集预设
+    filter-protocols: [http]  # 过滤协议：不检测但保留
+    urls:
+      - https://example.com/sub.yaml
+  - name: all-in-one
+    display-name: 全量聚合
+    priority: 900         # 聚合组放最后
+    filter-protocols: []
+    urls:
+      - /group/free-a/all.yaml  # 相对路径：引用其他组产物
+      - /group/free-b/all.yaml
 ```
 
-如果拉取非Github订阅速度慢，可使用通用的 HTTP_PROXY HTTPS_PROXY 环境变量加快速度；此变量不会影响节点测试速度
+### 组间引用与公网地址
+
+组 URL 支持两种写法：
+
+- **绝对地址**：`https://example.com/sub.yaml` —— 直接拉取。指向本机回环地址（`127.0.0.1` / `localhost`）会被拒绝。
+- **相对路径**：`/group/<name>/all.yaml` —— 系统内引用，自动展开为 `https://<public-url>/group/<name>/all.yaml?token=<api-key>`，并附加鉴权参数。
+
+相对路径展开依赖 `public-url` 配置。未配置时该组报错跳过（防止回环引用）。
+
+### 过滤双轨制
+
+`filter-protocols` 决定哪些协议**不参与检测**（默认过滤 `http` 明文协议）：
+
+- 命中的节点跳过测活/测速/打标，但**仍然落盘**到 `all-raw.yaml`
+- `all.yaml` 只包含已检测节点，`mihomo.yaml` 只融合已检测节点
+- 把 `filter-protocols` 置空即可恢复全部节点的检测与落盘
+
+### 检测流程
+
+```text
+ResolveAllGroups → 按 priority 排序 → 逐组串行：
+  FetchGroupProxies（拉组 URLs → 凭证指纹去重 → 过滤打标）
+    → CheckGroup（测活 → 测速 → 媒体检测 → 重命名）
+      → SaveGroup（落盘 all/mihomo/history/all-raw）
+```
+
+组间失败互不影响，`ForceClose` 可随时中断剩余组。
+
+## 规则集预设
+
+| 预设 | 说明 |
+|---|---|
+| `pro_full`（默认） | 126 策略组最详分流矩阵：流媒体 + AI + 各厂全家桶 + 去广告/隐私拦截 |
+| `pro_lite` | 精简分流矩阵（PRO-Lite 核心轻量） |
+| `acl4ssr` | 经典 ACL4SSR 在线全量规则集 |
+| `direct_pure` | 纯节点直通（仅节点列表，无策略组） |
+| `custom` | 自定义外部模板，配合 `overwrite-url` 使用 |
+
+`pro_full` 模板内置 25 个 rule-providers：自家 5 个 Provider（指向组产物）+ blackmatrix7 全站 18 个 + AdRules 去广告 + Privacy 隐私。rules 首两条 `RULE-SET,AdRules,REJECT` 与 `RULE-SET,Privacy,REJECT` 优先拦截广告与隐私追踪。
+
+## 产物说明
+
+每个组的产物输出在 `output/groups/<name>/`：
+
+| 文件 | 内容 |
+|---|---|
+| `all.yaml` | 已检测通过的节点纯列表（客户端直用） |
+| `all-raw.yaml` | 全量原始节点（含未检测的 skipped 节点） |
+| `mihomo.yaml` | 按组规则预设融合后的完整 Mihomo 配置 |
+| `history.yaml` | 本组历史评分池（供下次检测复用） |
+
+订阅直链：`https://<public-url>/group/<name>/all.yaml?token=<api-key>`（mihomo 配置在 `/group/<name>/mihomo.yaml`）。
+
+## 无头 CLI（subctl）
+
+`subctl` 是随主程序一起构建的命令行工具，适合容器/服务器场景精确读写配置。
 
 ```bash
-# HTTP 代理示例
-export HTTP_PROXY=http://username:password@192.168.1.1:7890
-export HTTPS_PROXY=http://username:password@192.168.1.1:7890
-
-# SOCKS5 代理示例
-export HTTP_PROXY=socks5://username:password@192.168.1.1:7890
-export HTTPS_PROXY=socks5://username:password@192.168.1.1:7890
-
-# SOCKS5H 代理示例
-export HTTP_PROXY=socks5h://username:password@192.168.1.1:7890
-export HTTPS_PROXY=socks5h://username:password@192.168.1.1:7890
+subctl validate                # 校验配置语法与关键字段
+subctl get groups.0.name       # 读取配置值（点号路径 + 下标）
+subctl set public-url "https://sub.example.com"  # 写入配置值
+subctl groups list             # 列出分组（含优先级）
+subctl groups toggle free-b true   # 启停分组
+subctl set groups.0.priority 10    # 调整优先级
+subctl presets                 # 查看规则集目录与各组预设
 ```
 
-如果想加速github的链接，可使用网上公开的github proxy
+路径语法：点号分隔字段名，切片用数字下标（如 `groups.0.urls`）。`set` 支持 bool / int / 字符串 / 逗号分隔数组。
 
-可使用 GitHub 项目 [CF-Proxy](https://github.com/sinspired/CF-Proxy) 自建 GitHub 代理，可直接复制 [worker.js](https://github.com/sinspired/CF-Proxy/blob/main/worker.js) 到 [Cloudflare](https://dash.cloudflare.com/) 的 workers。
+## API 摘要
+
+带鉴权（`X-API-Key` 头、`?token=` 查询或 Bearer）：
+
+- `GET /api/config` / `POST /api/config`：读取 / 保存配置
+- `GET /api/groups` / `POST /api/groups`：组列表 / 整表保存（拖拽排序复用此接口）
+- `POST /api/groups/toggle`：组启停
+- `GET /api/status`：检测状态
+- `POST /api/trigger-check`：手动触发检测
+- `POST /api/force-close`：强制中断
+- `GET /api/logs`：日志
+- `GET /api/analysis-report`：检测分析报告
+
+公开路由：`/group/:name/*` 组订阅分发、`/sub/*` 加密分享、`/more/*` 文件分享。
+
+## 配置速查
+
+关键配置项（完整见 `config/config.yaml.example`）：
 
 ```yaml
-# Github Proxy，获取订阅使用，结尾要带的 /
-# github-proxy: "https://ghfast.top/"
-github-proxy: 'https://proxy.custom-domain/'
+public-url: ""          # 公网访问地址（组间相对路径引用依赖此项）
+api-key: ""             # 所有接口与订阅链接的鉴权令牌
+listen-port: ":8199"    # 监听端口
+min-speed: 0            # 最低测速门槛（KB/s）
+rename-node: true       # 按 IP 地区重命名节点
+enhanced-tag: true      # 增强位置角标（HK² 等）
+filter-protocols: [http] # 组内过滤协议（不检测但保留）
+cron-expression: "0 2 * * *"  # 定时检测计划
 ```
 
-</details>
-
-### 🌐 自建测速地址（可选）
-
-<details>
-  <summary>展开查看</summary>
-
-> **⚠️ 注意：** 避免使用 Speedtest 或 Cloudflare 下载链接，因为部分节点会屏蔽测速网站。
-
-1. 将 [worker.js](./doc/cloudflare/worker.js) 部署到 Cloudflare Workers。
-2. 绑定自定义域名（避免被节点屏蔽）。
-3. 在配置文件中设置 `speed-test-url` 为你的 Workers 地址。
-4. 建议使用 `speed-test-url: random` 使用随机测速地址，避免对单个测速源造成负担。
-
-```yaml
-# 100MB
-speed-test-url: https://custom-domain/speedtest?bytes=104857600
-# 1GB
-speed-test-url: https://custom-domain/speedtest?bytes=1073741824
-```
-
-</details>
-
-## ⚙️ Cloudflare Tunnel 外网访问
-
-完整配置请见 Wiki：[Cloudflare Tunnel](https://github.com/sinspired/subs-check-pro/wiki/Cloudflare-Tunnel)
-
-## 🔔 通知渠道配置
-
-完整文档请见 Wiki：[通知渠道](https://github.com/sinspired/subs-check-pro/wiki/Notifications)
-
-## 🌍 域名相关
-
-> [!TIP]
-> Cloudflare Tunnel 外网访问和通知渠道部署需要域名，可自行注册或点击下方链接注册免费域名
->
-> [![域名注册](https://img.shields.io/badge/DigitalPlat-注册免费域名-2563eb?style=flat-square&logo=databricks&logoColor=ffffff)](https://dashboard.digitalplat.org/signup?ref=HZcosTVlmQ)
-
-> [!CAUTION]
-> 请勿用于非法用途！
-
-## 💾 保存方法
-
-见 Wiki：[保存方法](https://github.com/sinspired/subs-check-pro/wiki/Storage)
-
-## 📲 订阅使用方法
-
-完整文档请见 Wiki：[订阅使用方法](https://github.com/sinspired/subs-check-pro/wiki/Subscriptions)
-
-## 🌐 内置文件服务
-
-完整文档请见 Wiki：[内置文件服务](https://github.com/sinspired/subs-check-pro/wiki/File-Service)
-
-## 📱 安卓手机命令行运行
-
-完整文档请见 Wiki：[安卓手机命令行运行](https://github.com/sinspired/subs-check-pro/wiki/android)
-
-> [!TIP]
-> 🎉 Android 手机应用已发布，前往 [Subs Free](https://github.com/sinspired/subs-free) 体验
-
-## ✨ 新增功能与性能优化详情
-
-完整说明请见 Wiki：[新增功能与性能优化详情](https://github.com/sinspired/subs-check-pro/wiki/Features-Details)
-
-## 🤝 贡献与开发
-
-- 欢迎提交 PR 与 Issue，一起完善项目。
+## 开发
 
 ```bash
-git clone https://github.com/sinspired/subs-check-pro
-cd subs-check-pro
+# Go 后端
+go build -o submatrix .          # 需要 CGO（quickjs 依赖）；本地 Windows 无 gcc 时用 Docker 构建
+
+# 前端
+cd frontend && npm install && npm run build   # 产物输出到 webui/static/dist/
+
+# Docker（国内网络：需清代理 build-arg）
+docker build --build-arg HTTP_PROXY= --build-arg HTTPS_PROXY= \
+  --build-arg http_proxy= --build-arg https_proxy= \
+  --build-arg ALL_PROXY= --build-arg all_proxy= \
+  -t wenxiloveyou/submatrix:latest .
 ```
 
-## 🙏 鸣谢
+## License
 
-[beck-8](https://github.com/beck-8)、[Sub-Store](https://github.com/sub-store-org/Sub-Store)、[bestruirui](https://github.com/bestruirui/BestSub)
-
-<!-- ## ⭐ Star History
-
-[![Stargazers over time](https://starchart.cc/sinspired/subs-check-pro.svg?variant=adaptive)](https://starchart.cc/sinspired/subs-check-pro) -->
-
-## ⚖️ 免责声明
-
-本工具仅供学习和研究使用，不鼓励或支持任何非法活动。使用者应自行承担风险并遵守相关法律法规。
+本项目基于 MIT License 分发。上游参考：subs-check-pro（sinspired）、subs-check（beck-8），本项目已在其基础上深度重构。

@@ -45,6 +45,9 @@
 - 诊断结论：`append-original-name` / `tag-ip-type` / `node-prefix` 在代码里无消费点（上游行为）；
   `enhanced-tag` 默认开，但当前 config.yaml 缺该键（示例配置有，值为 true）。
 
+> 注：第 4 节顶部「按组切分」的形态已被第 5 节（按组独立检测）取代，
+> 保留在此仅为历史演进记录。当前实现以第 5 节为准。
+
 ### CLI subctl（cmd/subctl/）
 - 命令：`validate` / `get <路径>` / `set <路径> <值>` / `groups list|toggle` / `presets`。
 - 路径语法：点号 + 切片下标，如 `subctl get groups.0.name`；
@@ -86,3 +89,33 @@
 ### 配置要求
 - `public-url` 必须配置公网域名，聚合组（相对路径 URL）才可用
 - `min-speed` 阈值直接影响可用节点数（free-a 当前 4 个节点，因 min-speed=1 太严）
+- 当前实测：`public-url = https://sub-s.wenxi.dev`（Cloudflare Tunnel 公网入口）
+
+## 6. 过滤双轨制 + 126 模板 + 设置界面（2026-11-07 完成）
+
+### 过滤双轨制（不检测但保留）
+- `FetchGroupProxies`（proxy/group_fetch.go）不再丢弃被过滤节点：
+  `MatchesProtocol` 命中的节点打 `skipped: true` 标记保留
+- `distributeJobs`（check/check.go）遇 `skipped` 直接放行（不测活不测速），与免检直通同路径
+- `SaveGroup`（save/save.go）落盘双轨：
+  - `all.yaml`：已检测节点（客户端直用）
+  - `all-raw.yaml`：全量原始（含 skipped，取消过滤即恢复）
+  - `mihomo.yaml`：融合规则（只含已检测）
+  - `history.yaml`：历史评分池
+- `filter-protocols` 置空 = 全部节点检测 + 落盘
+
+### 126 组最详模板
+- `assets/Mihomo-Rules-126.yaml`：由旧 output/mihomo.yaml 静态化，5 处 `{{ProviderURL}}` 占位符
+- `pro_full` 默认指向它；`groupProviderURL`（save/save.go）落盘时替换为组产物公网直链
+- 现有 25 个 rule-providers：自家 5 个 Provider（组产物）+ blackmatrix7 18 个 + AdRules 去广告 + Privacy 隐私
+- rules 首两条 `RULE-SET,AdRules,REJECT` / `RULE-SET,Privacy,REJECT`
+- 模板备份：/tmp/Mihomo-Rules-126.yaml.bak
+
+### 设置界面（WebUI）
+- ConfigView 重构：常用设置表单（4 区 16 项）+ 进阶 YAML 折叠编辑器
+- 表单项读写 YAML 文本（行级精确替换），单一数据源；`min-speed` 标注 KB/s 单位
+- 导航 Tab「系统设置」独立
+
+### 命名格式
+- 当前 `🇺🇸US_1|30KB/s|免费A`（no enhanced-tag，config 缺 `enhanced-tag: true`）
+- 若要恢复 CF 角标（HK² 等）：config.yaml 加 `enhanced-tag: true` 即可

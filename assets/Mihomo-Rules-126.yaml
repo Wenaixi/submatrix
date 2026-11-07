@@ -2271,7 +2271,16 @@ rule-providers:
     proxy: DIRECT
     url: https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Privacy/Privacy_Classical_No_Resolve.yaml
     path: ./RuleSet/Privacy.yaml
+  BlockPCDN:
+    type: http
+    behavior: domain
+    interval: 86400
+    format: yaml
+    proxy: DIRECT
+    url: https://raw.githubusercontent.com/Wenaixi/submatrix/HEAD/assets/BlockPCDN.yaml
+    path: ./RuleSet/BlockPCDN.yaml
 rules:
+  - RULE-SET,BlockPCDN,REJECT
   - RULE-SET,AdRules,REJECT
   - RULE-SET,Privacy,REJECT
   - RULE-SET,ChinaMedia,DIRECT
