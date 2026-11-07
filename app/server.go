@@ -209,66 +209,14 @@ func (app *App) silentLoggerMiddleware() gin.HandlerFunc {
 //
 // - 公共文件：无需鉴权，直接暴露
 //
-// - 受保护文件：需要鉴权中间件
+// - 组产物：按组经 /group/<name>/* 网关分发（见 gateway.go RegisterGroupRoutes）
 func (app *App) registerStaticRoutes(router *gin.Engine, outputPath string) {
 	rulesDir := outputPath
-	subDir := filepath.Join(outputPath, "sub")
 
 	// 公共静态文件映射（无需鉴权），从包级变量读取
 	for _, f := range publicStaticFileList {
 		router.StaticFile(f.Route, filepath.Join(rulesDir, f.File))
 		router.StaticFile(SubPath+f.Route, filepath.Join(rulesDir, f.File))
-	}
-
-	// 受保护静态文件映射（需鉴权）
-	authGroup := router.Group("/")
-	authGroup.Use(app.authMiddleware())
-
-	// 自定义响应头中间件，好像用不上
-	// authGroup.Use(func(c *gin.Context) {
-	// 	c.Header("subscription-userinfo", buildSubscriptionInfo())
-	// 	c.Header("Cache-Control", "no-store")
-	// 	c.Next()
-	// })
-
-	protectedFiles := map[string]string{
-		"/all.yaml":     "all.yaml",     // 最新全量配置
-		"/history.yaml": "history.yaml", // 历史节点
-		"/base64.yaml":  "base64.txt",   // Base64 兼容格式
-		"/base64.txt":   "base64.txt",   // Base64 标准文本
-		"/mihomo.yaml":  "mihomo.yaml",  // Mihomo 全量带规则配置
-	}
-	for routePath, fileName := range protectedFiles {
-		// 映射到 outputPath/sub 下的文件
-		filePath := filepath.Join(subDir, fileName)
-		if fileName == "mihomo.yaml" {
-			handler := func(c *gin.Context) {
-				data, err := os.ReadFile(filePath)
-				if err != nil {
-					c.String(http.StatusNotFound, "文件不存在")
-					return
-				}
-				baseURL := GetCanonicalBaseURL(c)
-				token := c.Query("token")
-				if token == "" {
-					token = c.Query("api_key")
-				}
-				content := string(data)
-				content = strings.ReplaceAll(content, "http://127.0.0.1:8199", baseURL)
-				content = strings.ReplaceAll(content, "https://127.0.0.1:8199", baseURL)
-				content = strings.ReplaceAll(content, "127.0.0.1:8199", strings.TrimPrefix(strings.TrimPrefix(baseURL, "https://"), "http://"))
-				if token != "" && token != "wenxi-admin" {
-					content = strings.ReplaceAll(content, "token=wenxi-admin", "token="+token)
-				}
-				c.Header("Content-Type", "text/plain; charset=utf-8")
-				c.String(http.StatusOK, content)
-			}
-			authGroup.GET(routePath, handler)
-			authGroup.GET(SubPath+routePath, handler)
-		} else {
-			authGroup.StaticFile(routePath, filePath)
-			authGroup.StaticFile(SubPath+routePath, filePath)
-		}
 	}
 }
 
@@ -1032,10 +980,16 @@ func (app *App) saveGroupsHandler(c *gin.Context) {
 
 	// 校验组名唯一性且非空
 	seen := make(map[string]bool)
+	groupNamePattern := regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 	for _, g := range req.Groups {
 		trimmed := strings.TrimSpace(g.Name)
 		if trimmed == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "组名不能为空"})
+			return
+		}
+		// 组名参与文件路径（output/groups/<name>/），必须限制字符集防路径穿越
+		if !groupNamePattern.MatchString(trimmed) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "组名只允许字母、数字、下划线和连字符: " + trimmed})
 			return
 		}
 		if seen[trimmed] {
