@@ -273,7 +273,6 @@ func CheckGroup(grp config.ResolvedGroupConfig) ([]Result, []map[string]any, err
 	CurrentStepName.Store("解析组订阅")
 	// 按组拉取节点（不再使用全局 GetProxies · 组 URLs 独立拉取合并去重）
 	proxies, rawCount, err := proxyutils.FetchGroupProxies(grp)
-	lastResultLength, historyResultLength := 0, 0
 	if err != nil {
 		return nil, nil, fmt.Errorf("获取组订阅失败: %w", err)
 	}
@@ -291,14 +290,6 @@ func CheckGroup(grp config.ResolvedGroupConfig) ([]Result, []map[string]any, err
 	Progress.Store(0)
 	ProxyCount.Store(0)
 
-	if lastResultLength > 0 {
-		slog.Info("已加载上次检测可用节点", "数量", lastResultLength)
-	}
-
-	if historyResultLength > 0 {
-		slog.Info("已加载历次检测可用节点", "数量", historyResultLength)
-	}
-
 	CurrentStepName.Store("节点乱序")
 
 	// 假设有 15 个相似的 IP/域名
@@ -315,20 +306,9 @@ func CheckGroup(grp config.ResolvedGroupConfig) ([]Result, []map[string]any, err
 	// 获取动态映射的 CIDR 和 域名层级 文本
 	cidr, domainLevel := proxyutils.ThresholdToLevel(cfg.Threshold)
 
-	// 设置之前成功的节点顺序在前
-	headSize := lastResultLength
-
-	if len(proxies) > headSize && headSize > 0 {
-		tail := proxies[headSize:]
-		proxyutils.SmartShuffleByServer(tail, cfg)
-		// 动态输出到终端日志
-		slog.Info(fmt.Sprintf("节点乱序, 相同 CIDR %s 或 %s 最小间距: %d", cidr, domainLevel, cfg.MinSpacing))
-		slog.Info("上次成功节点未乱序", "count", headSize)
-	} else {
-		proxyutils.SmartShuffleByServer(proxies, cfg)
-		// 动态输出到终端日志
-		slog.Info(fmt.Sprintf("节点乱序, 相同 CIDR %s 或 %s 最小间距: %d", cidr, domainLevel, cfg.MinSpacing))
-	}
+	// 全量乱序（无上次成功节点优先排序）
+	proxyutils.SmartShuffleByServer(proxies, cfg)
+	slog.Info(fmt.Sprintf("节点乱序, 相同 CIDR %s 或 %s 最小间距: %d", cidr, domainLevel, cfg.MinSpacing))
 
 	CurrentStepName.Store("获取订阅完成")
 	if len(proxies) == 0 {
@@ -1775,9 +1755,14 @@ func containsLocation(filterLocs []string, country string) bool {
 // scoreAndRecycle 计算节点健康度分数。若分数 > 0，回收至 historyChan 以便后续统一排序保存。
 func (pc *ProxyChecker) scoreAndRecycle(proxy map[string]any, state string, speed int, result *Result) {
 	// 识别是否是历史节点或刚成功的节点
+	// 历史来源仅限本机回环 URL（旧全局产物回灌），公网组 URL（/group/<name>/all.yaml）不算历史
 	tag, _ := proxy["sub_tag"].(string)
 	urlStr, _ := proxy["sub_url"].(string)
-	isHistory := tag == "#History" || tag == "#Succeed" || strings.Contains(urlStr, "/history.yaml") || strings.Contains(urlStr, "/all.yaml")
+	isLocalHistoryURL := strings.Contains(urlStr, "127.0.0.1") ||
+		strings.Contains(urlStr, "localhost") ||
+		strings.Contains(urlStr, "::1")
+	isHistory := tag == "#History" || tag == "#Succeed" ||
+		(isLocalHistoryURL && (strings.Contains(urlStr, "/history.yaml") || strings.Contains(urlStr, "/all.yaml")))
 
 	// 如果是全新抓取来的节点，且本次检测失败，直接无视不记录入历史
 	if !isHistory && state != "success" {

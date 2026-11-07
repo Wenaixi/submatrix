@@ -969,6 +969,10 @@ func (app *App) getGroupsHandler(c *gin.Context) {
 	})
 }
 
+// 组名参与文件路径（output/groups/<name>/），限制字符集防路径穿越。
+// 包级变量供 gateway.go 的 /group/:name 路由共用。
+var groupNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
 // saveGroupsHandler 全量更新分组列表并保存到配置文件
 func (app *App) saveGroupsHandler(c *gin.Context) {
 	var req struct {
@@ -981,7 +985,6 @@ func (app *App) saveGroupsHandler(c *gin.Context) {
 
 	// 校验组名唯一性且非空
 	seen := make(map[string]bool)
-	groupNamePattern := regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 	for _, g := range req.Groups {
 		trimmed := strings.TrimSpace(g.Name)
 		if trimmed == "" {

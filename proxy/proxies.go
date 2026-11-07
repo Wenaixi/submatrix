@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"os"
 	"runtime"
 	"runtime/debug"
 	"sort"
@@ -568,21 +567,6 @@ func resolveSubUrls(progressCallback func(stepName string, done, total, availabl
 	return out, localNum, remoteNum, historyNum
 }
 
-func appendLocalResult(
-	urls []string,
-	filePath string,
-	sourceURL string,
-	tag string,
-	historyNum *int,
-) []string {
-	if _, err := os.Stat(filePath); err == nil {
-		*historyNum++
-		urls = append([]string{
-			sourceURL + "#" + tag,
-		}, urls...)
-	}
-	return urls
-}
 
 // fetchRemoteSubUrls 从远程地址读取订阅URL清单
 func fetchRemoteSubUrls(listURL string) ([]string, error) {

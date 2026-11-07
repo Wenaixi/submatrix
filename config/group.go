@@ -239,10 +239,6 @@ func sortResolvedGroups(groups []ResolvedGroupConfig) {
 	})
 }
 
-// SortGroupsByPriority 对外导出的排序入口（供 CLI/前端预览使用）。
-func SortGroupsByPriority(groups []ResolvedGroupConfig) {
-	sortResolvedGroups(groups)
-}
 
 func resolveTimeout(t int) int {
 	if t <= 0 {

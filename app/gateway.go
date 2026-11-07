@@ -81,6 +81,11 @@ func RegisterGroupRoutes(router *gin.Engine, outputPath string, authMiddleware g
 
 	groupRoute.GET("/:name/*filepath", func(c *gin.Context) {
 		groupName := c.Param("name")
+		// 组名参与文件路径（output/groups/<name>/），必须限制字符集防路径穿越
+		if !groupNamePattern.MatchString(groupName) {
+			c.String(http.StatusBadRequest, "组名非法")
+			return
+		}
 		relPath := strings.TrimPrefix(c.Param("filepath"), "/")
 		if relPath == "" {
 			relPath = "all.yaml"

@@ -28,13 +28,6 @@ func ReadFileIfExists(path string) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
-func buildMihomoYAML(proxies []map[string]any) ([]byte, error) {
-	templateData, err := fetchMihomoTemplate()
-	if err != nil {
-		return nil, fmt.Errorf("获取 mihomo 覆写模板失败: %w", err)
-	}
-	return mergeMihomoTemplate(templateData, proxies)
-}
 
 func mergeMihomoTemplate(templateData []byte, proxies []map[string]any) ([]byte, error) {
 	if len(strings.TrimSpace(string(templateData))) == 0 {

@@ -67,19 +67,4 @@ func FindGroupByTagOrURL(tag, subURL string) config.ResolvedGroupConfig {
 	return config.FindGroupByTagOrURL(tag, subURL)
 }
 
-// FilterProxiesByGroup 根据组的协议过滤规则过滤节点列表
-func FilterProxiesByGroup(grp config.ResolvedGroupConfig, proxies []map[string]any) []map[string]any {
-	res := make([]map[string]any, 0, len(proxies))
-	for _, p := range proxies {
-		if p == nil {
-			continue
-		}
-		typ := strings.ToLower(fmt.Sprintf("%v", p["type"]))
-		if grp.MatchesProtocol(typ) {
-			continue
-		}
-		res = append(res, p)
-	}
-	return res
-}
 

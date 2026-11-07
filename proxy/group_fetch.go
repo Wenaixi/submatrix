@@ -75,7 +75,8 @@ func FetchGroupProxies(grp config.ResolvedGroupConfig) ([]map[string]any, int, e
 				continue
 			}
 			// 打上归属标记，供下游统计与报告使用
-			node["sub_url"] = fetchURL
+			// 注意：sub_url 存不含 token 的净地址，避免令牌泄漏到落盘产物
+			node["sub_url"] = stripQuery(fetchURL)
 			if grp.Tag != "" {
 				node["sub_tag"] = grp.Tag
 			}
@@ -152,4 +153,12 @@ func expandGroupRelativeURL(raw string) (string, error) {
 		full += sep + "token=" + apiKey
 	}
 	return full, nil
+}
+
+// stripQuery 去掉 URL 的查询参数（?token=xxx 等），用于落盘前脱敏。
+func stripQuery(raw string) string {
+	if idx := strings.IndexByte(raw, '?'); idx >= 0 {
+		return raw[:idx]
+	}
+	return raw
 }
