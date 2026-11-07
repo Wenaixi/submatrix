@@ -97,6 +97,9 @@ type ProxyChecker struct {
 	threadCount int
 	available   atomic.Int32
 
+	// grp 是本组当前的参数化配置（组级字段在此读取，全局字段仍走 config.GlobalConfig）
+	grp config.ResolvedGroupConfig
+
 	aliveConcurrent int
 	speedConcurrent int
 	mediaConcurrent int
@@ -161,21 +164,21 @@ func (job *ProxyJob) Close() {
 }
 
 // calcSpeedConcurrency 根据总速度限制计算速度测试的最佳并发数。
-func calcSpeedConcurrency(proxyCount int) int {
+func calcSpeedConcurrency(proxyCount, minSpeed int) int {
 	if config.GlobalConfig.TotalSpeedLimit <= 0 {
 		threadCount := min(proxyCount, config.GlobalConfig.Concurrent)
 		fnSpeed := NewPowerDecay(32, 1.1, 32, 1)
 		return min(config.GlobalConfig.Concurrent, RoundInt(fnSpeed(float64(threadCount))))
 	}
 	L := float64(config.GlobalConfig.TotalSpeedLimit) // 单位: MB/s
-	r := float64(config.GlobalConfig.MinSpeed) / 1024 // 目标每线程吞吐: MB/s
+	r := float64(minSpeed) / 1024                     // 目标每线程吞吐: MB/s
 	c := max(int(L/r), 1)
 	c = min(c, config.GlobalConfig.Concurrent)
 	return c
 }
 
 // NewProxyChecker 创建新的检测器实例
-func NewProxyChecker(proxyCount int) *ProxyChecker {
+func NewProxyChecker(proxyCount int, grp config.ResolvedGroupConfig) *ProxyChecker {
 	threadCount := min(proxyCount, config.GlobalConfig.Concurrent)
 
 	cAlive := config.GlobalConfig.AliveConcurrent
@@ -198,12 +201,12 @@ func NewProxyChecker(proxyCount int) *ProxyChecker {
 		// 使用相对平滑的衰减方案
 		fnAlive := NewLogDecay(400, 0.005, 400)
 		fnMedia := NewExpDecay(400, 0.001, 100)
-		if !speedON {
+		if !grp.CheckSpeed {
 			fnMedia = NewExpDecay(400, 0.001, 150)
 		}
 
 		aliveConc = min(proxyCount, RoundInt(fnAlive(float64(threadCount))))
-		speedConc = min(calcSpeedConcurrency(proxyCount), proxyCount)
+		speedConc = min(calcSpeedConcurrency(proxyCount, grp.MinSpeed), proxyCount)
 		mediaConc = min(proxyCount, RoundInt(fnMedia(float64(threadCount))))
 
 		// 超大线程数
@@ -217,13 +220,14 @@ func NewProxyChecker(proxyCount int) *ProxyChecker {
 	// 测速阶段的缓冲通道不用太大,以形成阻塞,避免测活浪费资源
 	fnScLength := NewTanhDecay(100, 0.0004, float64(aliveConc))
 	speedChanLength = RoundInt(fnScLength(float64(speedConc)))
-	if !speedON {
+	if !grp.CheckSpeed {
 		speedChanLength = 1 // 不启用测速时，设置为最小缓冲
 	}
 
 	return &ProxyChecker{
 		proxyCount:  proxyCount,
 		threadCount: threadCount,
+		grp:         grp,
 
 		// 设置不同检测阶段的并发数
 		aliveConcurrent: aliveConc,
@@ -243,8 +247,15 @@ func NewProxyChecker(proxyCount int) *ProxyChecker {
 	}
 }
 
-// Check 执行代理检测的主函数
+// Check 执行代理检测的主函数（临时兼容壳，P4 组循环落地后删除）
 func Check() ([]Result, []map[string]any, error) {
+	grp := config.FindGroupByTagOrURL("", "")
+	return CheckGroup(grp)
+}
+
+// CheckGroup 按单个组的配置执行代理检测
+// 组级字段来自 grp，全局字段仍读 config.GlobalConfig；串行调用，无并发残留。
+func CheckGroup(grp config.ResolvedGroupConfig) ([]Result, []map[string]any, error) {
 	proxyutils.ResetRenameCounter()
 	ForceClose.Store(false)
 	Successlimited.Store(false)
@@ -259,9 +270,9 @@ func Check() ([]Result, []map[string]any, error) {
 	// 重置预计剩余时间计算
 	ResetETA()
 
-	// 初始化测速和流媒体检测开关
-	speedON = config.GlobalConfig.SpeedTestURL != ""
-	mediaON = config.GlobalConfig.MediaCheck
+	// 初始化测速和流媒体检测开关（派生于组配置）
+	speedON = grp.CheckSpeed
+	mediaON = grp.MediaCheck
 
 	// 标记订阅获取阶段开始
 	Fetching.Store(true)
@@ -336,7 +347,7 @@ func Check() ([]Result, []map[string]any, error) {
 	Fetching.Store(false)
 	Checking.Store(true)
 
-	checker := NewProxyChecker(len(proxies))
+	checker := NewProxyChecker(len(proxies), grp)
 
 	results, historyPool, err := checker.run(proxies)
 	checker = nil //nolint:ineffassign
@@ -411,8 +422,8 @@ func (pc *ProxyChecker) run(proxies []map[string]any) ([]Result, []map[string]an
 		}
 	}
 	// 只有在 >0 时才输出
-	if config.GlobalConfig.SuccessLimit > 0 {
-		args = append(args, "success-limit", config.GlobalConfig.SuccessLimit)
+	if pc.grp.SuccessLimit > 0 {
+		args = append(args, "success-limit", pc.grp.SuccessLimit)
 	}
 	if config.GlobalConfig.TotalSpeedLimit > 0 && speedON {
 		args = append(args, "total-speed-limit", config.GlobalConfig.TotalSpeedLimit)
@@ -425,9 +436,9 @@ func (pc *ProxyChecker) run(proxies []map[string]any) ([]Result, []map[string]an
 
 	if speedON {
 		args = append(args,
-			"min-speed", config.GlobalConfig.MinSpeed,
+			"min-speed", pc.grp.MinSpeed,
 			"download-timeout", config.GlobalConfig.DownloadTimeout,
-			"download-mb", config.GlobalConfig.DownloadMB,
+			"download-mb", pc.grp.DownloadMB,
 		)
 	}
 
@@ -534,7 +545,7 @@ func (pc *ProxyChecker) run(proxies []map[string]any) ([]Result, []map[string]an
 			caps.Speed = pc.speedConcurrent
 		}
 		if mediaON {
-			caps.Media = pc.mediaConcurrent * len(config.GlobalConfig.Platforms)
+			caps.Media = pc.mediaConcurrent * len(pc.grp.Platforms)
 		}
 		utils.NetGuard.Start(probeCtx, caps, max(20, pc.proxyCount/20))
 	}
@@ -576,8 +587,8 @@ func (pc *ProxyChecker) run(proxies []map[string]any) ([]Result, []map[string]an
 	// 确保进度显示到 100%
 	pc.pt.Finalize()
 
-	if config.GlobalConfig.SuccessLimit > 0 && pc.available.Load() >= config.GlobalConfig.SuccessLimit {
-		slog.Info(fmt.Sprintf("达到成功节点数量限制 %d, 收集结果完成。", config.GlobalConfig.SuccessLimit))
+	if pc.grp.SuccessLimit > 0 && pc.available.Load() >= pc.grp.SuccessLimit {
+		slog.Info(fmt.Sprintf("达到成功节点数量限制 %d, 收集结果完成。", pc.grp.SuccessLimit))
 	}
 
 	// 标记检测完成，开始处理结果，保存，上传等
@@ -731,7 +742,7 @@ func (pc *ProxyChecker) distributeJobs(proxies []map[string]any, ctx context.Con
 					Result: Result{Proxy: mapping},
 				}
 				job.NeedCF = config.GlobalConfig.DropBadCfNodes ||
-					(config.GlobalConfig.MediaCheck && needsCF(config.GlobalConfig.Platforms))
+					(pc.grp.MediaCheck && needsCF(pc.grp.Platforms))
 
 				// 当 aliveChan 满时会阻塞
 				select {
@@ -901,9 +912,9 @@ func (pc *ProxyChecker) runSpeedStage(ctx context.Context, cancel context.Cancel
 					continue
 				}
 				getBytes := func() uint64 { return job.Client.BytesRead.Load() }
-				speed, _, err := platform.CheckSpeed(job.Client.Client, Bucket, getBytes)
+				speed, _, err := platform.CheckSpeed(job.Client.Client, Bucket, getBytes, pc.grp.SpeedTestURL, config.GlobalConfig.DownloadTimeout, pc.grp.DownloadMB)
 				utils.NetGuard.Release(utils.GateSpeed)
-				success := err == nil && speed >= config.GlobalConfig.MinSpeed
+				success := err == nil && speed >= pc.grp.MinSpeed
 				if job.speedMarked.CompareAndSwap(false, true) {
 					pc.pt.CountSpeed(success)
 					// 仅在测速成功时计入可用数量
@@ -918,28 +929,28 @@ func (pc *ProxyChecker) runSpeedStage(ctx context.Context, cancel context.Cancel
 				}
 				job.Speed = speed
 
-				if config.GlobalConfig.SuccessLimit > 0 && pc.available.Load() >= config.GlobalConfig.SuccessLimit {
+				if pc.grp.SuccessLimit > 0 && pc.available.Load() >= pc.grp.SuccessLimit {
 					stopOnce.Do(func() {
 						Successlimited.Store(true)
 						var msg string
 						if mediaON {
 							if speedON {
 								msg = "达到成功节点数量限制 " +
-									strconv.Itoa(int(config.GlobalConfig.SuccessLimit)) +
+									strconv.Itoa(int(pc.grp.SuccessLimit)) +
 									", 等待测速和媒体检测任务完成..."
 							} else {
 								msg = "达到成功节点数量限制 " +
-									strconv.Itoa(int(config.GlobalConfig.SuccessLimit)) +
+									strconv.Itoa(int(pc.grp.SuccessLimit)) +
 									", 等待媒体检测任务完成..."
 							}
 						} else {
 							if speedON {
 								msg = "达到成功节点数量限制 " +
-									strconv.Itoa(int(config.GlobalConfig.SuccessLimit)) +
+									strconv.Itoa(int(pc.grp.SuccessLimit)) +
 									", 等待测速和节点重命名任务完成..."
 							} else {
 								msg = "达到成功节点数量限制 " +
-									strconv.Itoa(int(config.GlobalConfig.SuccessLimit)) +
+									strconv.Itoa(int(pc.grp.SuccessLimit)) +
 									", 等待节点重命名任务完成..."
 							}
 						}
@@ -963,8 +974,8 @@ func (pc *ProxyChecker) runSpeedStage(ctx context.Context, cancel context.Cancel
 func (pc *ProxyChecker) runMediaStageAndCollect(db *maxminddb.Reader, ctx context.Context, cancel context.CancelFunc) {
 	var wg sync.WaitGroup
 	resultLength := pc.mediaConcurrent
-	if config.GlobalConfig.SuccessLimit != 0 {
-		resultLength = int(config.GlobalConfig.SuccessLimit)
+	if pc.grp.SuccessLimit != 0 {
+		resultLength = int(pc.grp.SuccessLimit)
 	}
 
 	pc.resultChan = make(chan Result, resultLength)
@@ -996,17 +1007,17 @@ func (pc *ProxyChecker) runMediaStageAndCollect(db *maxminddb.Reader, ctx contex
 					}
 
 					// 设置成功数量限制
-					if config.GlobalConfig.SuccessLimit > 0 && pc.available.Load() >= config.GlobalConfig.SuccessLimit {
+					if pc.grp.SuccessLimit > 0 && pc.available.Load() >= pc.grp.SuccessLimit {
 						stopOnce.Do(func() {
 							Successlimited.Store(true)
 							pc.pt.FinishAliveStage()
 							if mediaON {
 								Successlimited.Store(true)
-								slog.Warn(fmt.Sprintf("达到成功节点数量限制 %d, 等待媒体检测任务完成...", config.GlobalConfig.SuccessLimit))
+								slog.Warn(fmt.Sprintf("达到成功节点数量限制 %d, 等待媒体检测任务完成...", pc.grp.SuccessLimit))
 								slog.Warn("测活模式将丢弃多余结果")
 							} else {
 								Successlimited.Store(true)
-								slog.Warn(fmt.Sprintf("达到成功节点数量限制 %d, 等待节点重命名任务完成...", config.GlobalConfig.SuccessLimit))
+								slog.Warn(fmt.Sprintf("达到成功节点数量限制 %d, 等待节点重命名任务完成...", pc.grp.SuccessLimit))
 								slog.Warn("测活模式将丢弃多余结果")
 							}
 
@@ -1016,7 +1027,7 @@ func (pc *ProxyChecker) runMediaStageAndCollect(db *maxminddb.Reader, ctx contex
 				}
 
 				if mediaON && !checkCtxDone(ctx) {
-					mediaCheck(job, db, ctx)
+					pc.mediaCheck(job, db, ctx)
 				}
 
 				pc.updateProxyName(&job.Result, job.Client, job.Speed, db, job.CfLoc, job.CfIP, ctx)
@@ -1077,7 +1088,7 @@ func needsCF(platforms []string) bool {
 }
 
 // mediaCheck 并发检测所有媒体解锁平台
-func mediaCheck(job *ProxyJob, db *maxminddb.Reader, ctx context.Context) {
+func (pc *ProxyChecker) mediaCheck(job *ProxyJob, db *maxminddb.Reader, ctx context.Context) {
 	mediaTimeout := config.GlobalConfig.MediaCheckTimeout
 	if mediaTimeout <= 0 {
 		mediaTimeout = 10
@@ -1088,7 +1099,7 @@ func mediaCheck(job *ProxyJob, db *maxminddb.Reader, ctx context.Context) {
 		Timeout:   time.Duration(mediaTimeout) * time.Second,
 	}
 
-	plats := config.GlobalConfig.Platforms
+	plats := pc.grp.Platforms
 
 	// 若同时检测 youtube 或 gemini，提前获取 Google 国家码供两者共享，避免重复请求
 	needGoogleCountry := false
@@ -1279,7 +1290,7 @@ func checkOnePlatform(job *ProxyJob, plat string, mediaClient *http.Client, db *
 // updateProxyName 更新代理名称
 func (pc *ProxyChecker) updateProxyName(res *Result, httpClient *ProxyClient, speed int, db *maxminddb.Reader, cfLoc string, cfIP string, jctx context.Context) {
 	// 以节点IP查询位置重命名（如果开启）
-	if config.GlobalConfig.RenameNode {
+	if pc.grp.RenameNode {
 		if res.Country == "" {
 			// 使用 MediaCheckTimeout 替换默认的短超时
 			locTimeout := config.GlobalConfig.MediaCheckTimeout
@@ -1297,12 +1308,12 @@ func (pc *ProxyChecker) updateProxyName(res *Result, httpClient *ProxyClient, sp
 			res.ISPTag = ispTag
 		}
 		if res.Country != "" {
-			res.Proxy["name"] = config.GlobalConfig.NodePrefix + proxyutils.Rename(res.Country, res.CountryCodeTag)
+			res.Proxy["name"] = pc.grp.NodePrefix + proxyutils.Rename(res.Country, res.CountryCodeTag)
 		} else {
 			// 位置确实取不到时：一律按未知处理，追加序号，绝不拼接原始名。
 			// 原始实现会无条件拼接 originName，导致「国旗+原始名滚雪球」的怪名叠字；
 			// append-original-name 开关在此没有消费方（上游行为），这里直接放弃拼接。
-			res.Proxy["name"] = config.GlobalConfig.NodePrefix + proxyutils.Rename("", "")
+			res.Proxy["name"] = pc.grp.NodePrefix + proxyutils.Rename("", "")
 		}
 	}
 
@@ -1313,7 +1324,7 @@ func (pc *ProxyChecker) updateProxyName(res *Result, httpClient *ProxyClient, sp
 
 	var tags []string
 	// 速度标签
-	if config.GlobalConfig.SpeedTestURL != "" && speed > 0 {
+	if pc.grp.CheckSpeed && speed > 0 {
 		name = regexp.MustCompile(`\s*\|(?:\s*[\d.]+[KM]B/s)`).ReplaceAllString(name, "")
 		var speedStr string
 		if speed < 100 {
@@ -1325,7 +1336,7 @@ func (pc *ProxyChecker) updateProxyName(res *Result, httpClient *ProxyClient, sp
 		tags = append(tags, speedStr)
 	}
 
-	if config.GlobalConfig.MediaCheck {
+	if pc.grp.MediaCheck {
 		// 移除旧标签
 		name = regexp.MustCompile(
 			`\s*\|(?:NF|D\+|GPT[⁺]?|CP[⁻]?|GM[⁺]?[ˀ]?(?:-[A-Z]{2})?|X|YT[⁻]?(?:-[A-Z]{2}[⁻]?)?|TK[⁻]?(?:-[^|]+)?|\d+%)`).
@@ -1333,7 +1344,7 @@ func (pc *ProxyChecker) updateProxyName(res *Result, httpClient *ProxyClient, sp
 	}
 
 	// 平台标签（按用户配置顺序）
-	for _, plat := range config.GlobalConfig.Platforms {
+	for _, plat := range pc.grp.Platforms {
 		switch plat {
 		case "openai":
 			if res.Openai {
@@ -1419,7 +1430,7 @@ func (pc *ProxyChecker) updateProxyName(res *Result, httpClient *ProxyClient, sp
 	}
 
 	// 运营商标签
-	if config.GlobalConfig.ISPCheck {
+	if pc.grp.ISPCheck {
 		if res.ISPTag != "" {
 			tags = append(tags, res.ISPTag)
 		}

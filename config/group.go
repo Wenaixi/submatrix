@@ -62,6 +62,12 @@ type ResolvedGroupConfig struct {
 	SuccessLimit       int32
 	DownloadMB         int
 	Priority           int
+
+	// 组级继承的全局字段（检测层参数化所需）
+	SpeedTestURL string
+	Platforms    []string
+	NodePrefix   string
+	ISPCheck     bool
 }
 
 // MatchesProtocol 检查指定协议是否属于本组配置过滤排除的协议
@@ -135,6 +141,11 @@ func ResolveGroup(g GroupConfig, global Config) ResolvedGroupConfig {
 		URLs:               g.URLs,
 		Proxy:              proxy,
 		FilterProtocols:    filterProtocols,
+		// 组级继承的全局字段（检测层参数化所需）
+		SpeedTestURL: global.SpeedTestURL,
+		Platforms:    global.Platforms,
+		NodePrefix:   global.NodePrefix,
+		ISPCheck:     global.ISPCheck,
 	}
 
 	if res.DisplayName == "" {
@@ -204,6 +215,11 @@ func ResolveAllGroups(global Config) []ResolvedGroupConfig {
 				FilterProtocols:    []string{"http"},
 				SuccessLimit:       global.SuccessLimit,
 				DownloadMB:         global.DownloadMB,
+				// 组级继承（default 组等价于全局配置）
+				SpeedTestURL: global.SpeedTestURL,
+				Platforms:    global.Platforms,
+				NodePrefix:   global.NodePrefix,
+				ISPCheck:     global.ISPCheck,
 			},
 		}
 	}

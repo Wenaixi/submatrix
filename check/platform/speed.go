@@ -14,7 +14,6 @@ import (
 
 	"github.com/juju/ratelimit"
 	"github.com/metacubex/mihomo/common/convert"
-	"github.com/Wenaixi/submatrix/config"
 )
 
 var testURLs []string
@@ -61,9 +60,10 @@ func (r *networkLimitedReader) Read(p []byte) (int, error) {
 }
 
 // CheckSpeed 执行下载测速
-func CheckSpeed(httpClient *http.Client, bucket *ratelimit.Bucket, getNetBytes func() uint64) (int, int64, error) {
+// speedURL/downloadTimeoutSec/downloadMB 来自组配置（组级字段参数化）
+func CheckSpeed(httpClient *http.Client, bucket *ratelimit.Bucket, getNetBytes func() uint64, speedURL string, downloadTimeoutSec, downloadMB int) (int, int64, error) {
 	// 确定测速 URL，根据配置使用随机下载测速链接
-	url := config.GlobalConfig.SpeedTestURL
+	url := speedURL
 	if strings.Contains(url, "random") && len(testURLs) > 0 {
 		url = testURLs[rand.IntN(len(testURLs))]
 	}
@@ -73,7 +73,7 @@ func CheckSpeed(httpClient *http.Client, bucket *ratelimit.Bucket, getNetBytes f
 	speedClient.Timeout = 0
 
 	// 下载需要根据配置文件设置较长的超时
-	timeout := time.Duration(config.GlobalConfig.DownloadTimeout) * time.Second
+	timeout := time.Duration(downloadTimeoutSec) * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
@@ -105,8 +105,8 @@ func CheckSpeed(httpClient *http.Client, bucket *ratelimit.Bucket, getNetBytes f
 	}
 
 	var limit uint64
-	if mb := config.GlobalConfig.DownloadMB; mb > 0 {
-		limit = uint64(mb) * 1024 * 1024
+	if downloadMB > 0 {
+		limit = uint64(downloadMB) * 1024 * 1024
 	}
 
 	limitedReader := &networkLimitedReader{
