@@ -22,259 +22,6 @@ import (
 	"github.com/Wenaixi/submatrix/utils"
 )
 
-// ProxyCategory 定义代理分类
-type ProxyCategory struct {
-	Name    string
-	Proxies []map[string]any
-	Filter  func(result check.Result) bool
-}
-
-// ConfigSaver 处理配置保存的结构体
-type ConfigSaver struct {
-	methodName string
-	results    []check.Result
-	categories []ProxyCategory
-	saveMethod func([]byte, string) error
-}
-
-// localClient 用于本地 SubStore 请求
-var localClient = &http.Client{
-	Timeout: 30 * time.Second,
-	Transport: &http.Transport{
-		Proxy: nil,
-
-		// 强制 HTTP/1.1，避免本地服务对 HTTP/2 支持不完整
-		ForceAttemptHTTP2: false,
-
-		// 大连接池，避免 TIME_WAIT 导致失败
-		MaxIdleConns:        100,
-		MaxIdleConnsPerHost: 100,
-		IdleConnTimeout:     90 * time.Second,
-
-		// 更快的连接建立
-		DisableKeepAlives:  false,
-		DisableCompression: false,
-	},
-}
-
-// NewConfigSaver 创建新的配置保存器，支持显式指定保存方法
-func NewConfigSaver(results []check.Result, historyNodes []map[string]any, saveMethodName string) *ConfigSaver {
-	categories := []ProxyCategory{
-		{Name: "all.yaml", Proxies: nil, Filter: func(r check.Result) bool { return true }},
-		{Name: "mihomo.yaml", Proxies: nil, Filter: func(r check.Result) bool { return true }},
-		{Name: "base64.txt", Proxies: nil, Filter: func(r check.Result) bool { return true }},
-	}
-
-	// 只有在配置开启了保存历史记录时，才将 history.yaml 加入保存队列
-	// 直接使用传入的 historyNodes，因为这批节点已经在 check 阶段完成了加减分、去重和排序
-	if config.GlobalConfig.UseHistoryResult {
-		categories = append(categories, ProxyCategory{
-			Name:    "history.yaml",
-			Proxies: historyNodes,
-			// Filter 设为 false，防止其从本次检测的 results 结果中二次重复抓取
-			Filter: func(r check.Result) bool { return false },
-		})
-	}
-
-	return &ConfigSaver{
-		methodName: saveMethodName,
-		results:    results,
-		saveMethod: getSaverFunc(saveMethodName),
-		categories: categories,
-	}
-}
-
-// SaveConfig 保存配置的入口函数
-func SaveConfig(results []check.Result, historyNodes []map[string]any) {
-	// 在保存前，确保本次检测的所有节点名称完全唯一
-	var resultProxies []map[string]any
-	for _, r := range results {
-		if r.Proxy != nil {
-			resultProxies = append(resultProxies, r.Proxy)
-		}
-	}
-	utils.RenameDuplicateNodes(resultProxies)
-
-	// 1. 始终先保存到本地一份
-	localSaver := NewConfigSaver(results, historyNodes, "local")
-	if err := localSaver.Save(); err != nil {
-		slog.Error("保存本地配置失败", "err", err)
-	}
-
-	// 2. 如果配置了其他远程保存方式，则执行远程保存
-	remoteMethod := config.GlobalConfig.SaveMethod
-	if remoteMethod != "" && remoteMethod != "local" {
-		remoteSaver := NewConfigSaver(results, historyNodes, remoteMethod)
-		if err := remoteSaver.Save(); err != nil {
-			slog.Error("保存远程配置失败", "method", remoteMethod, "err", err)
-		}
-	}
-}
-
-// Save 执行保存操作
-func (cs *ConfigSaver) Save() error {
-	cs.categorizeProxies()
-
-	for _, category := range cs.categories {
-		if len(category.Proxies) == 0 {
-			slog.Warn("节点为空，跳过保存", "文件", category.Name, "保存方法", cs.methodName)
-			continue
-		}
-
-		// 1. 生成内容 (解耦生成与保存)
-		content, err := cs.generateContent(category)
-		if err != nil {
-			slog.Error("生成内容失败", "文件", category.Name, "err", err)
-			continue
-		}
-		if len(content) == 0 { // 例如 base64 在没有运行 substore 时返回空
-			continue
-		}
-
-		// 2. 写入存储
-		if err := cs.saveMethod(content, category.Name); err != nil {
-			slog.Error("保存失败", "文件", category.Name, "保存方法", cs.methodName, "err", err)
-		}
-	}
-
-	return nil
-}
-
-// categorizeProxies 将代理按类别分类
-func (cs *ConfigSaver) categorizeProxies() {
-	for _, result := range cs.results {
-		for i := range cs.categories {
-			if cs.categories[i].Filter(result) {
-				cs.categories[i].Proxies = append(cs.categories[i].Proxies, result.Proxy)
-			}
-		}
-	}
-}
-
-// generateContent 根据文件类型生成对应的字节数据
-func (cs *ConfigSaver) generateContent(category ProxyCategory) ([]byte, error) {
-	switch category.Name {
-	case "history.yaml":
-		dedupedProxies := deduplicateByProxyKey(category.Proxies)
-		return yaml.Marshal(map[string]any{"proxies": dedupedProxies})
-	case "all.yaml":
-		return cs.generateAllYaml(category.Proxies)
-	case "mihomo.yaml":
-		return cs.generateMihomo(category.Proxies)
-	case "base64.txt":
-		return cs.generateBase64()
-	default:
-		return nil, fmt.Errorf("未知的文件类型: %s", category.Name)
-	}
-}
-
-func (cs *ConfigSaver) generateAllYaml(proxies []map[string]any) ([]byte, error) {
-	yamlData, err := yaml.Marshal(map[string]any{"proxies": proxies})
-	if err != nil {
-		return nil, fmt.Errorf("序列化 %w", err)
-	}
-
-	// 仅在执行本地保存，且 SubStore 运行时触发 SubStore 更新
-	if cs.methodName == "local" && config.GlobalConfig.SubStorePort != "" && substore.IsSubStoreRunning.Load() {
-		substore.SyncSubStore(yamlData)
-	}
-	return yamlData, nil
-}
-
-func (cs *ConfigSaver) generateMihomo(proxies []map[string]any) ([]byte, error) {
-	fallback := func() ([]byte, error) {
-		return buildMihomoYAML(proxies)
-	}
-
-	// 同时检查端口配置和运行状态，避免无效连接
-	if config.GlobalConfig.SubStorePort == "" || !substore.IsSubStoreRunning.Load() {
-		return fallback()
-	}
-
-	targetURL := substore.BaseURL + "/api/file/" + substore.MihomoName
-	resp, err := localClient.Get(targetURL)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		slog.Warn("远程获取 mihomo 失败，回退到本地生成", "err", err, "status", func() int {
-			if resp != nil {
-				return resp.StatusCode
-			}
-			return 0
-		}())
-		return fallback()
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		slog.Warn("读取 mihomo 响应失败，回退到本地生成", "err", err)
-		return fallback()
-	}
-	return body, nil
-}
-
-func (cs *ConfigSaver) generateBase64() ([]byte, error) {
-	if config.GlobalConfig.SubStorePort == "" || !substore.IsSubStoreRunning.Load() {
-		return nil, nil // 不满足条件直接跳过，不报错
-	}
-
-	// http://127.0.0.1:8299/download/sub?target=V2Ray
-	targetURL := substore.BaseURL + "/download/" + substore.SubName + "?target=V2Ray"
-	resp, err := localClient.Get(targetURL)
-	if err != nil {
-		return nil, fmt.Errorf("请求 base64 失败: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("读取 base64 失败: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("获取 base64 失败，状态码: %d", resp.StatusCode)
-	}
-	return body, nil
-}
-
-// ---------------- 以下为辅助函数部分 ----------------
-
-// getSaverFunc 根据配置选择保存方法
-func getSaverFunc(methodName string) func([]byte, string) error {
-	switch methodName {
-	case "r2":
-		if err := method.ValiR2Config(); err != nil {
-			return func(b []byte, s string) error { return fmt.Errorf("r2配置不完整: %w", err) }
-		}
-		uploader := method.NewR2Uploader()
-		return uploader.Upload
-	case "gist":
-		if err := method.ValiGistConfig(); err != nil {
-			return func(b []byte, s string) error { return fmt.Errorf("gist配置不完整: %w", err) }
-		}
-		uploader := method.NewGistUploader()
-		return uploader.Upload
-	case "webdav":
-		if err := method.ValiWebDAVConfig(); err != nil {
-			return func(b []byte, s string) error { return fmt.Errorf("webDAV配置不完整: %w", err) }
-		}
-		uploader := method.NewWebDAVUploader()
-		return uploader.Upload
-	case "s3":
-		if err := method.ValiS3Config(); err != nil {
-			return func(b []byte, s string) error { return fmt.Errorf("S3配置不完整: %w", err) }
-		}
-		return method.UploadToS3
-	case "local":
-		fallthrough
-	default:
-		saver, err := method.NewLocalSaver()
-		if err != nil {
-			return func(b []byte, s string) error { return fmt.Errorf("本地保存器创建失败: %w", err) }
-		}
-		saver.OutputPath = filepath.Join(saver.OutputPath, "sub")
-		return saver.Save
-	}
-}
-
 func ReadFileIfExists(path string) ([]byte, error) {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return nil, nil
@@ -532,9 +279,14 @@ func buildGroupMihomoYAML(grp config.ResolvedGroupConfig, proxies []map[string]a
 	return mergeMihomoTemplate(templateData, proxies)
 }
 
-// SaveGroupConfig 保存特定组的独立检测结果到 groups/<groupName>/ 目录
-func SaveGroupConfig(grp config.ResolvedGroupConfig, results []check.Result) {
-	if len(results) == 0 || grp.Name == "" {
+// SaveGroup 保存单个组的检测结果到 groups/<name>/ 目录。
+//   - all.yaml     纯节点列表（供 proxy-providers 引用）
+//   - mihomo.yaml  按组规则预设融合后的完整配置
+//   - history.yaml 本组历史节点评分池（保留 sub_url/sub_tag）
+//
+// results 为本组本次检测成功节点；historyPool 为本组历史池（含失败但仍有分数的节点）。
+func SaveGroup(grp config.ResolvedGroupConfig, results []check.Result, historyPool []map[string]any) {
+	if grp.Name == "" {
 		return
 	}
 
@@ -543,129 +295,58 @@ func SaveGroupConfig(grp config.ResolvedGroupConfig, results []check.Result) {
 		slog.Error("获取保存目录失败", "err", err)
 		return
 	}
-
 	groupDir := filepath.Join(saver.OutputPath, "groups", grp.Name)
 	if err := os.MkdirAll(groupDir, 0755); err != nil {
 		slog.Error("创建组输出目录失败", "dir", groupDir, "err", err)
 		return
 	}
 
+	// 1. 过滤 + 清洗本次结果
 	proxiesList := make([]map[string]any, 0, len(results))
 	for _, r := range results {
 		if r.Proxy == nil {
 			continue
 		}
-		// 协议过滤防线：确保被当前组过滤排除的协议绝不落盘到组订阅中
 		typ := strings.ToLower(fmt.Sprintf("%v", r.Proxy["type"]))
 		if grp.MatchesProtocol(typ) {
 			continue
 		}
-		clean := sanitizeProxyForYAML(r.Proxy)
-		proxiesList = append(proxiesList, clean)
+		proxiesList = append(proxiesList, sanitizeProxyForYAML(r.Proxy))
 	}
 
-	// 0. 单组节点保留数量上限拦截 (SuccessLimit，截取前 N 个最优质节点)
+	// 2. 单组节点上限（截取前 N 个最优质节点）
 	if grp.SuccessLimit > 0 && len(proxiesList) > int(grp.SuccessLimit) {
-		slog.Info("单组节点上限生效，截取最优节点", "组", grp.Name, "原数量", len(proxiesList), "截取后", grp.SuccessLimit)
+		slog.Info("单组节点上限生效", "组", grp.Name, "原数量", len(proxiesList), "截取后", grp.SuccessLimit)
 		proxiesList = proxiesList[:grp.SuccessLimit]
 	}
 
-	// 1. 保存纯节点列表 all.yaml (供 proxy-providers 引用)
-	allYamlData, err := yaml.Marshal(map[string]any{"proxies": proxiesList})
-	if err == nil {
-		_ = os.WriteFile(filepath.Join(groupDir, "all.yaml"), allYamlData, 0644)
-	}
+	// 3. 落盘 all.yaml 与 mihomo.yaml
+	writeGroupYAML(grp, proxiesList)
 
-	// 2. 如果是纯节点直通预设，mihomo.yaml 也存纯节点
-	if grp.RulePreset == config.RulePresetDirectPure {
-		_ = os.WriteFile(filepath.Join(groupDir, "mihomo.yaml"), allYamlData, 0644)
-		return
-	}
-
-	// 3. 融合策略组与分流规则模板保存为完整的 mihomo.yaml (客户端开箱即用)
-	mihomoData, err := buildGroupMihomoYAML(grp, proxiesList)
-	if err == nil && len(mihomoData) > 0 {
-		_ = os.WriteFile(filepath.Join(groupDir, "mihomo.yaml"), mihomoData, 0644)
-	} else if err == nil {
-		slog.Warn("合并组规则模板失败，降级保存纯节点", "group", grp.Name, "err", err)
-		_ = os.WriteFile(filepath.Join(groupDir, "mihomo.yaml"), allYamlData, 0644)
-	}
-}
-
-// SplitResultsByGroupFromPool 从历史节点池（保留完整 sub_url/sub_tag 元数据）按组切分落盘。
-// 检测流程在 CleanupMetadata 剥离元数据后 results 不可再用于归属判定，
-// 而 HistoryPool 始终保留归属字段，因此以它为唯一数据源。
-// 返回每个组写入的节点数量。
-func SplitResultsByGroupFromPool(pool []map[string]any) map[string]int {
-	groups := config.ResolveAllGroups(*config.GlobalConfig)
-	out := make(map[string]int)
-	for _, grp := range groups {
-		if !grp.Enabled {
-			continue
-		}
-		var grpProxies []map[string]any
-		for _, p := range pool {
+	// 4. 落盘 history.yaml（组历史池，按分数降序已由 check 层保证）
+	if len(historyPool) > 0 {
+		pool := make([]map[string]any, 0, len(historyPool))
+		for _, p := range historyPool {
 			if p == nil {
 				continue
 			}
-			tag, _ := p["sub_tag"].(string)
-			subURL, _ := p["sub_url"].(string)
-			if grp.MatchesNode(tag, subURL) {
-				grpProxies = append(grpProxies, p)
-			}
-		}
-		if len(grpProxies) == 0 {
-			continue
-		}
-		proxiesList := make([]map[string]any, 0, len(grpProxies))
-		for _, p := range grpProxies {
 			typ := strings.ToLower(fmt.Sprintf("%v", p["type"]))
 			if grp.MatchesProtocol(typ) {
 				continue
 			}
-			proxiesList = append(proxiesList, sanitizeProxyForYAML(p))
+			pool = append(pool, sanitizeProxyForYAML(p))
 		}
-		if len(proxiesList) == 0 {
-			continue
+		if len(pool) > 0 {
+			deduped := deduplicateByProxyKey(pool)
+			if data, err := yaml.Marshal(map[string]any{"proxies": deduped}); err == nil {
+				_ = os.WriteFile(filepath.Join(groupDir, "history.yaml"), data, 0644)
+			}
 		}
-		writeGroupYAML(grp, proxiesList)
-		out[grp.Name] = len(proxiesList)
 	}
-	return out
+
+	slog.Info("组产物已落盘", "组", grp.Name, "节点", len(proxiesList), "历史", len(historyPool))
 }
 
-// SplitResultsByGroup 将一次全局检测的结果按节点归属切分到各个启用的组。
-// 每个节点依据其 sub_tag / sub_url 匹配唯一组；未匹配的节点归入全局结果，不重复落盘。
-// 返回每个组写入的节点数量，供日志与 CLI 展示。
-//
-// 注意：必须在 check.CleanupMetadata 之前调用（或传入保留元数据的历史副本），
-// 否则 sub_url / sub_tag 已被剥离，组归属信息丢失。
-func SplitResultsByGroup(results []check.Result) map[string]int {
-	groups := config.ResolveAllGroups(*config.GlobalConfig)
-	out := make(map[string]int)
-	for _, grp := range groups {
-		if !grp.Enabled {
-			continue
-		}
-		var grpResults []check.Result
-		for _, r := range results {
-			if r.Proxy == nil {
-				continue
-			}
-			tag, _ := r.Proxy["sub_tag"].(string)
-			subURL, _ := r.Proxy["sub_url"].(string)
-			if grp.MatchesNode(tag, subURL) {
-				grpResults = append(grpResults, r)
-			}
-		}
-		if len(grpResults) == 0 {
-			continue
-		}
-		SaveGroupConfig(grp, grpResults)
-		out[grp.Name] = len(grpResults)
-	}
-	return out
-}
 
 // writeGroupYAML 把一组节点写入 groups/<name>/all.yaml 与 mihomo.yaml（按规则预设融合）。
 func writeGroupYAML(grp config.ResolvedGroupConfig, proxiesList []map[string]any) {

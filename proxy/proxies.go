@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"sort"
@@ -545,46 +544,6 @@ func resolveSubUrls(progressCallback func(stepName string, done, total, availabl
 		slog.Info("拉取订阅列表")
 	}
 
-	requiredListenPort := strings.TrimSpace(strings.TrimPrefix(config.GlobalConfig.ListenPort, ":"))
-	localLastResultURL := "http://127.0.0.1:" + requiredListenPort + "/all.yaml"
-	localHistoryResultURL := "http://127.0.0.1:" + requiredListenPort + "/history.yaml"
-
-	if config.GlobalConfig.UseLastResult ||
-		config.GlobalConfig.UseHistoryResult {
-
-		saver, err := method.NewLocalSaver()
-		if err == nil {
-			saver.OutputPath = filepath.Join(saver.OutputPath, "sub")
-
-			if !filepath.IsAbs(saver.OutputPath) {
-				saver.OutputPath = filepath.Join(
-					saver.BasePath,
-					saver.OutputPath,
-				)
-			}
-
-			if config.GlobalConfig.UseLastResult {
-				urls = appendLocalResult(
-					urls,
-					filepath.Join(saver.OutputPath, "all.yaml"),
-					localLastResultURL,
-					"LastResult",
-					&historyNum,
-				)
-			}
-
-			if config.GlobalConfig.UseHistoryResult {
-				urls = appendLocalResult(
-					urls,
-					filepath.Join(saver.OutputPath, "history.yaml"),
-					localHistoryResultURL,
-					"History",
-					&historyNum,
-				)
-			}
-		}
-	}
-
 	// 去重并过滤本地 URL（忽略 fragment）
 	seen := make(map[string]struct{}, len(urls))
 	out := make([]string, 0, len(urls))
@@ -598,18 +557,6 @@ func resolveSubUrls(progressCallback func(stepName string, done, total, availabl
 		if d, err := url.Parse(s); err == nil {
 			d.Fragment = ""
 			key = d.String()
-
-			switch key {
-			case localLastResultURL:
-				if !config.GlobalConfig.UseLastResult {
-					continue
-				}
-
-			case localHistoryResultURL:
-				if !config.GlobalConfig.UseHistoryResult {
-					continue
-				}
-			}
 		}
 
 		if _, ok := seen[key]; ok {

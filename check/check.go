@@ -247,12 +247,6 @@ func NewProxyChecker(proxyCount int, grp config.ResolvedGroupConfig) *ProxyCheck
 	}
 }
 
-// Check 执行代理检测的主函数（临时兼容壳，P4 组循环落地后删除）
-func Check() ([]Result, []map[string]any, error) {
-	grp := config.FindGroupByTagOrURL("", "")
-	return CheckGroup(grp)
-}
-
 // CheckGroup 按单个组的配置执行代理检测
 // 组级字段来自 grp，全局字段仍读 config.GlobalConfig；串行调用，无并发残留。
 func CheckGroup(grp config.ResolvedGroupConfig) ([]Result, []map[string]any, error) {
@@ -276,17 +270,16 @@ func CheckGroup(grp config.ResolvedGroupConfig) ([]Result, []map[string]any, err
 
 	// 标记订阅获取阶段开始
 	Fetching.Store(true)
-	CurrentStepName.Store("解析远程列表")
-	// 获取订阅节点和之前成功的节点数量(已前置)
-	proxies, rawCount, lastResultLength, historyResultLength, err := proxyutils.GetProxies(func(stepName string, done, total, available int) {
-		CurrentStepName.Store(stepName)
-		Progress.Store(uint32(done))
-		ProxyCount.Store(uint32(total))
-		Available.Store(uint32(available))
-	})
+	CurrentStepName.Store("解析组订阅")
+	// 按组拉取节点（不再使用全局 GetProxies · 组 URLs 独立拉取合并去重）
+	proxies, rawCount, err := proxyutils.FetchGroupProxies(grp)
+	lastResultLength, historyResultLength := 0, 0
 	if err != nil {
-		return nil, nil, fmt.Errorf("获取节点失败: %w", err)
+		return nil, nil, fmt.Errorf("获取组订阅失败: %w", err)
 	}
+	Progress.Store(uint32(len(proxies)))
+	ProxyCount.Store(uint32(rawCount))
+	Available.Store(0)
 	slog.Info("已获取节点", "数量", rawCount)
 	slog.Info("去重后节点", "数量", len(proxies))
 

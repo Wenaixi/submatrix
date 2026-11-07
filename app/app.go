@@ -393,56 +393,71 @@ func (app *App) checkProxies() error {
 	check.StartProgress()
 	defer check.StopProgress()
 
-	results, historyNodes, err := check.Check()
-	if err != nil {
-		return fmt.Errorf("检测代理失败: %w", err)
-	}
+	// 组循环：按 priority 小→大串行检测各组，组间失败互不影响
+	groups := config.ResolveAllGroups(*config.GlobalConfig)
+	slog.Info("开始按组检测", "组数", len(groups))
 
-	slog.Info("检测完成")
+	var (
+		totalResults  int
+		totalTx       int64
+		activeGroups  int
+	)
 
-	check.CurrentStepName.Store("保存配置")
-	save.SaveConfig(results, historyNodes)
-
-	// 按组切分：historyNodes 保留 sub_url/sub_tag 归属元数据（results 已在
-	// check.CleanupMetadata 中剥离），以它为唯一数据源分发到各启用的组。
-	if len(config.GlobalConfig.Groups) > 0 {
-		if counts := save.SplitResultsByGroupFromPool(historyNodes); len(counts) > 0 {
-			for grpName, n := range counts {
-				slog.Info("组订阅已落盘", "组", grpName, "节点数", n)
-			}
+	for _, grp := range groups {
+		if !grp.Enabled {
+			slog.Info("跳过禁用组", "组", grp.Name)
+			continue
 		}
+		if check.ForceClose.Load() {
+			slog.Warn("检测被手动终止，跳过剩余组", "组", grp.Name)
+			break
+		}
+
+		slog.Info("开始检测组", "组", grp.Name, "优先级", grp.Priority)
+		check.CurrentStepName.Store("检测组: " + grp.Name)
+
+		results, historyNodes, err := check.CheckGroup(grp)
+		if err != nil {
+			slog.Error("组检测失败", "组", grp.Name, "err", err)
+			continue
+		}
+
+		activeGroups++
+		totalResults += len(results)
+		totalTx += check.CheckTrafficTotal
+
+		// 组落盘（all.yaml + mihomo.yaml + history.yaml）
+		save.SaveGroup(grp, results, historyNodes)
+		slog.Info("组检测完成", "组", grp.Name, "可用节点", len(results))
+
+		// 让组产物即时对外可用（网关 /group/<name>/* ）
+		utils.UpdateSubs()
 	}
 
-	check.CurrentStepName.Store("更新订阅")
-	utils.UpdateSubs()
+	// 所有组处理完，汇总计数
+	app.lastCheck.time.Store(time.Now())
+	app.lastCheck.duration.Store(int64(time.Since(startTime).Seconds()))
+	app.lastCheck.Total.Store(int64(totalResults))
+	app.lastCheck.available.Store(int64(totalResults))
+	app.lastCheck.traffic.Store(totalTx)
+
+	check.CurrentStepName.Store("发送通知")
+	utils.SendNotifyCheckResult(totalResults, check.CheckTrafficTotal)
 
 	if config.GlobalConfig.CallbackScript != "" {
 		check.CurrentStepName.Store("执行回调脚本")
 	}
-	// 执行回调脚本
-	utils.ExecuteCallback(len(results))
-
-	endTime := time.Now()
-
-	// 更新 lastCheck 结果（使用 Store 方法确保原子性）
-	app.lastCheck.time.Store(endTime)
-	app.lastCheck.duration.Store(int64(endTime.Sub(startTime).Seconds()))
-	app.lastCheck.Total.Store(int64(check.ProxyCount.Load()))
-	app.lastCheck.available.Store(int64(len(results)))
-	app.lastCheck.traffic.Store(int64(check.TotalBytes.Load()))
-
-	check.CurrentStepName.Store("发送通知")
-	utils.SendNotifyCheckResult(len(results), check.CheckTrafficTotal)
+	utils.ExecuteCallback(totalResults)
 
 	check.CurrentStepName.Store("清理检测缓存")
-	// 切断所有大对象的应用
-	results = nil //nolint:ineffassign
 	proxyutils.ClearCache()
 
 	// 每次运行清理旧缓存，防止多轮执行后失效订阅残留或混淆
 	proxyutils.SubStatsMutex.Lock()
 	proxyutils.SubStats = make(map[string]proxyutils.SubStat)
 	proxyutils.SubStatsMutex.Unlock()
+
+	slog.Info("全部组检测完成", "组数", activeGroups, "总可用节点", totalResults)
 	return nil
 }
 
