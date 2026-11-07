@@ -2255,7 +2255,25 @@ rule-providers:
     proxy: DIRECT
     url: https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Telegram/Telegram.yaml
     path: ./RuleSet/Telegram.yaml
+  AdRules:
+    type: http
+    behavior: domain
+    interval: 86400
+    format: yaml
+    proxy: DIRECT
+    url: https://gp.adrules.top/adrules_domainset.txt
+    path: ./RuleSet/AdRules.txt
+  Privacy:
+    type: http
+    behavior: classical
+    interval: 86400
+    format: yaml
+    proxy: DIRECT
+    url: https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/Privacy/Privacy_Classical_No_Resolve.yaml
+    path: ./RuleSet/Privacy.yaml
 rules:
+  - RULE-SET,AdRules,REJECT
+  - RULE-SET,Privacy,REJECT
   - RULE-SET,ChinaMedia,DIRECT
   - RULE-SET,China,DIRECT
   - RULE-SET,LAN,DIRECT
