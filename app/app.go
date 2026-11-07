@@ -424,7 +424,7 @@ func (app *App) checkProxies() error {
 
 		activeGroups++
 		totalResults += len(results)
-		totalTx += check.CheckTrafficTotal
+		totalTx += int64(check.TotalBytes.Load())
 
 		// 组落盘（all.yaml + mihomo.yaml + history.yaml）
 		save.SaveGroup(grp, results, historyNodes)

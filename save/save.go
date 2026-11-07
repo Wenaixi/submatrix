@@ -18,7 +18,6 @@ import (
 	"github.com/Wenaixi/submatrix/check"
 	"github.com/Wenaixi/submatrix/config"
 	"github.com/Wenaixi/submatrix/save/method"
-	"github.com/Wenaixi/submatrix/substore"
 	"github.com/Wenaixi/submatrix/utils"
 )
 
