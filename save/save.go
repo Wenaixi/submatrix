@@ -245,8 +245,8 @@ func fetchTemplateByPreset(preset, overwriteURL string) ([]byte, error) {
 	case config.RulePresetProFull, "":
 		fallthrough
 	default:
-		// 默认使用主人最详分流矩阵 (126个策略组 + 全量流媒体与AI)
-		return fetchLocalOrAssetTemplate("Mihomo-Rules-CDN.yaml")
+		// 默认使用最详分流矩阵（126 策略组 + 流媒体/AI 全分流，静态化资产）
+		return fetchLocalOrAssetTemplate("Mihomo-Rules-126.yaml")
 	}
 }
 
@@ -275,7 +275,28 @@ func buildGroupMihomoYAML(grp config.ResolvedGroupConfig, proxies []map[string]a
 	if len(templateData) == 0 {
 		return yaml.Marshal(map[string]any{"proxies": proxies})
 	}
-	return mergeMihomoTemplate(templateData, proxies)
+	content := string(templateData)
+	// 126 组模板的 proxy-providers 用 {{ProviderURL}} 占位符，
+	// 落盘时替换为"本组的公网产物地址"（public-url 或本机兜底），
+	// 使 ProviderALL 等始终指向当前组自身的产物。
+	content = strings.ReplaceAll(content, "{{ProviderURL}}", groupProviderURL(grp))
+	return mergeMihomoTemplate([]byte(content), proxies)
+}
+
+// groupProviderURL 计算组 mihomo.yaml 中 proxy-providers 指向的本组产物地址。
+func groupProviderURL(grp config.ResolvedGroupConfig) string {
+	base := strings.TrimRight(strings.TrimSpace(config.GlobalConfig.PublicURL), "/")
+	if base == "" {
+		// 未配置 public-url 时退回本机（仅用于本地导入场景）
+		port := strings.TrimPrefix(config.GlobalConfig.ListenPort, ":")
+		base = "http://127.0.0.1:" + port
+	}
+	url := base + "/group/" + grp.Name + "/all.yaml"
+	apiKey := strings.TrimSpace(config.GlobalConfig.APIKey)
+	if apiKey != "" {
+		url += "?token=" + apiKey
+	}
+	return url
 }
 
 // SaveGroup 保存单个组的检测结果到 groups/<name>/ 目录。
@@ -300,29 +321,38 @@ func SaveGroup(grp config.ResolvedGroupConfig, results []check.Result, historyPo
 		return
 	}
 
-	// 1. 过滤 + 清洗本次结果
-	proxiesList := make([]map[string]any, 0, len(results))
+	// 1. 过滤 + 清洗本次结果（区分已检测与 skipped 保留节点）
+	proxiesList := make([]map[string]any, 0, len(results)) // 已检测（供客户端直用）
+	rawList := make([]map[string]any, 0, len(results))      // 全量（含 skipped 未检测）
 	for _, r := range results {
 		if r.Proxy == nil {
 			continue
 		}
-		typ := strings.ToLower(fmt.Sprintf("%v", r.Proxy["type"]))
-		if grp.MatchesProtocol(typ) {
+		clean := sanitizeProxyForYAML(r.Proxy)
+		rawList = append(rawList, clean)
+		if skipped, _ := clean["skipped"].(bool); skipped {
 			continue
 		}
-		proxiesList = append(proxiesList, sanitizeProxyForYAML(r.Proxy))
+		proxiesList = append(proxiesList, clean)
 	}
 
-	// 2. 单组节点上限（截取前 N 个最优质节点）
+	// 2. 单组节点上限（仅截取已检测列表，raw 全量保留）
 	if grp.SuccessLimit > 0 && len(proxiesList) > int(grp.SuccessLimit) {
 		slog.Info("单组节点上限生效", "组", grp.Name, "原数量", len(proxiesList), "截取后", grp.SuccessLimit)
 		proxiesList = proxiesList[:grp.SuccessLimit]
 	}
 
-	// 3. 落盘 all.yaml 与 mihomo.yaml
+	// 3. 落盘 all.yaml（已检测）与 mihomo.yaml（融合规则）
 	writeGroupYAML(grp, proxiesList)
 
-	// 4. 落盘 history.yaml（组历史池，按分数降序已由 check 层保证）
+	// 4. 落盘 all-raw.yaml（全量原始，含 skipped 未检测节点）
+	if len(rawList) > 0 {
+		if data, err := yaml.Marshal(map[string]any{"proxies": rawList}); err == nil {
+			_ = os.WriteFile(filepath.Join(groupDir, "all-raw.yaml"), data, 0644)
+		}
+	}
+
+	// 5. 落盘 history.yaml（组历史池，按分数降序已由 check 层保证）
 	if len(historyPool) > 0 {
 		pool := make([]map[string]any, 0, len(historyPool))
 		for _, p := range historyPool {

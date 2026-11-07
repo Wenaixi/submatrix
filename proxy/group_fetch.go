@@ -55,7 +55,7 @@ func FetchGroupProxies(grp config.ResolvedGroupConfig) ([]map[string]any, int, e
 			continue
 		}
 
-		// 单 URL 内清洗：协议过滤、字段归一化、有效性校验
+		// 单 URL 内清洗：字段归一化、有效性校验
 		valid := 0
 		for _, node := range nodes {
 			rawCount++
@@ -66,9 +66,9 @@ func FetchGroupProxies(grp config.ResolvedGroupConfig) ([]map[string]any, int, e
 			if typ == "" || typ == "invalid" {
 				continue
 			}
-			// 组协议过滤（默认排除 http 明文协议）
+			// 组协议过滤：命中的节点不丢弃，打 skipped 标记保留（不检测但落盘）
 			if grp.MatchesProtocol(typ) {
-				continue
+				node["skipped"] = true
 			}
 			// 字段语义修正；返回 false 表示该节点无效
 			if !parse.NormalizeNode(node) {

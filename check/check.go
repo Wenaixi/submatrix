@@ -696,25 +696,21 @@ func (pc *ProxyChecker) distributeJobs(proxies []map[string]any, ctx context.Con
 					}(index)
 				}
 
-				// 组级特性注入与协议过滤
-				subTag, _ := mapping["sub_tag"].(string)
-				subURL, _ := mapping["sub_url"].(string)
-				grp := FindGroupByTagOrURL(subTag, subURL)
+				// 组级前置代理注入：测活与测速均走此代理
+				if pc.grp.Proxy != "" {
+					mapping["group_proxy"] = pc.grp.Proxy
+				}
 
-				// 协议过滤：如果命中了该组设置的过滤协议（默认过滤 http），直接丢弃该节点，不进行后续测活与测速
-				pType := strings.ToLower(fmt.Sprintf("%v", mapping["type"]))
-				if grp.MatchesProtocol(pType) {
-					pc.pt.CountAlive(false)
+				// 协议过滤命中（拉取阶段已打 skipped 标记）：不测活不测速，直接放行落盘
+				if skipped, _ := mapping["skipped"].(bool); skipped {
+					pc.pt.CountAlive(true)
+					r := Result{Proxy: mapping}
+					pc.scoreAndRecycle(mapping, "success", 0, &r)
 					continue
 				}
 
-				// 组级前置代理注入：测活与测速均走此代理
-				if grp.Proxy != "" {
-					mapping["group_proxy"] = grp.Proxy
-				}
-
 				// 4A 核心免检直通深层重构：若所属组已关闭连通测活，彻底跳过网络握手，0 网络 I/O 瞬间放行
-				if !grp.CheckAlive {
+				if !pc.grp.CheckAlive {
 					pc.pt.CountAlive(true)
 					r := Result{Proxy: mapping}
 					pc.scoreAndRecycle(mapping, "success", 0, &r)
