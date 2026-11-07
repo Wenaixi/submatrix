@@ -63,3 +63,26 @@
 - 容器 API 健康检查必须 `curl --noproxy "*"`：本机系统代理（Clash 10801）会把
   回环请求也代理掉，产生假 502。
 - 新镜像验证三件套：容器日志「组订阅已落盘」行 + `output/groups/*/all.yaml` 时间戳 + 节点名抽查。
+
+## 5. 按组独立检测 + priority 串行（2026-11-07 完成）
+
+### 架构
+- `app.checkProxies` 组循环：ResolveAllGroups → priority 排序 → 逐个 `check.CheckGroup` → `save.SaveGroup`
+- `check.CheckGroup(grp)` 用 `proxy.FetchGroupProxies` 拉组 URLs（不再走全局 GetProxies）
+- `save.SaveGroup(grp, results, historyPool)` 落盘 `groups/<name>/{all,mihomo,history}.yaml`
+- 相对路径 URL（`/group/x/all.yaml`）→ `expandGroupRelativeURL` 拼接 `public-url + token`；**public-url 为空则组报错跳过**（防止回环引用）
+- 组内跨 URL 凭证指纹去重（GenerateProxyKey）；同 IP 不同账号保留
+
+### 已删除
+- 全局产物体系（output/all.yaml、sub/*、base64.txt 保存 + 路由 + GetProxies 的 last/history 回灌）
+- `check.Check()`（被 CheckGroup 取代）、`SplitResultsByGroup*`、`ConfigSaver/SaveConfig/getSaverFunc`
+- `use-last-result/use-history-result` 失去功能（字段保留标记 deprecated）
+
+### 新能力
+- WebUI 组卡片拖拽排序（原生 HTML5 DnD，drop 重写 priority）
+- 组名白名单校验 `[A-Za-z0-9_-]`（saveGroupsHandler，防路径穿越）
+- subctl `groups list` 显示优先级，`set groups.N.priority N` 可改
+
+### 配置要求
+- `public-url` 必须配置公网域名，聚合组（相对路径 URL）才可用
+- `min-speed` 阈值直接影响可用节点数（free-a 当前 4 个节点，因 min-speed=1 太严）
