@@ -16,6 +16,25 @@ interface GroupsViewProps {
 export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, listenPort, apiKey, onRefresh }) => {
   const { showToast } = useToast();
   const [saving, setSaving] = useState(false);
+  // 拖拽排序状态
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [overIdx, setOverIdx] = useState<number | null>(null);
+
+  // 拖拽重排：drop 时把拖起卡片移到目标位置，并按新顺序重写 priority（双写容错）
+  const reorder = (from: number, to: number) => {
+    if (from === to) return;
+    setGroups(prev => {
+      const copy = [...prev];
+      const [moved] = copy.splice(from, 1);
+      copy.splice(to, 0, moved);
+      copy.forEach((g, i) => {
+        g.Priority = i;
+        g.priority = i;
+      });
+      return copy;
+    });
+    showToast("顺序已调整，点击「保存配置」生效");
+  };
 
   // 复制直链
   const copyLink = (url: string) => {
@@ -189,6 +208,27 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
           return (
             <div
               key={idx}
+              draggable={!saving}
+              onDragStart={(e) => {
+                if (saving) { e.preventDefault(); return; }
+                // 表单控件内的拖选（文本/下拉）不触发卡片拖拽
+                const t = e.target as HTMLElement;
+                if (t.closest('input, textarea, select')) {
+                  e.preventDefault();
+                  return;
+                }
+                setDragIdx(idx);
+                e.dataTransfer.effectAllowed = "move";
+                e.dataTransfer.setData("text/plain", String(idx));
+              }}
+              onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+              onDragEnter={(e) => { e.preventDefault(); setOverIdx(idx); }}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (dragIdx !== null) reorder(dragIdx, idx);
+                setDragIdx(null); setOverIdx(null);
+              }}
+              onDragEnd={() => { setDragIdx(null); setOverIdx(null); }}
               style={{
                 background: 'var(--surface-2)',
                 border: '1px solid var(--border)',
@@ -196,8 +236,11 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
                 display: 'flex',
                 flexDirection: 'column',
                 gap: '14px',
-                opacity: isEnabled ? 1 : 0.6,
-                borderStyle: isEnabled ? 'solid' : 'dashed'
+                opacity: isEnabled ? (dragIdx === idx ? 0.5 : 1) : 0.6,
+                borderStyle: isEnabled ? 'solid' : 'dashed',
+                cursor: saving ? 'default' : 'grab',
+                outline: overIdx === idx && dragIdx !== null && dragIdx !== idx ? '2px dashed var(--accent)' : 'none',
+                outlineOffset: '-2px'
               }}
             >
               {/* 卡片头部：标识与主开关 */}
@@ -215,7 +258,9 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
               </div>
 
               {/* 一级总控：连通测活总控横幅 (1A 独立指挥条) */}
-              <div style={{
+              <div
+                onDragStart={(e) => { e.stopPropagation(); e.preventDefault(); }}
+                style={{
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',

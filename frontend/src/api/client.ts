@@ -120,6 +120,8 @@ export interface GroupItem {
   successLimit?: number;
   download_mb?: number;
   downloadMB?: number;
+  priority?: number;
+  Priority?: number;
 }
 
 export interface GroupsResponse {
