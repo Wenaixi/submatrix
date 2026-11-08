@@ -71,28 +71,24 @@ func allowRequest(ip, code string) bool {
 // getClientIP 优先取 X-Forwarded-For 最左值，但若为私有/回环则忽略（防伪造）；
 // 回退 RemoteAddr。
 func getClientIP(c *gin.Context) string {
-	// 默认：信任 XFF 最右非私有值（兼容 Cloudflare 隧道：CF 把真实客户端 IP 追加在最后）。
-	// 若配置了 trusted-proxy-ips 白名单，则仅当 RemoteAddr 命中白名单时才信 XFF（严格模式）。
+	// 默认严格：不信任任何 X-Forwarded-For，限速/统计基于 TCP 连接真实来源（RemoteAddr）。
+	// 攻击者无法伪造 RemoteAddr（TCP 层），因此直连场景 XFF 伪造完全失效。
+	// 仅当配置 trusted-proxy-ips 白名单（如 Cloudflare 边缘 IP）且 RemoteAddr 命中时，
+	// 才信任 XFF 最右值（CF 追加的真实客户端 IP）。
 	remoteHost, _, err := net.SplitHostPort(c.Request.RemoteAddr)
 	if err != nil {
 		remoteHost = c.Request.RemoteAddr
 	}
 
-	if trustedProxiesEnabled {
-		// 严格模式：只有可信代理转发的请求才信 XFF
-		if !trustedProxies[remoteHost] {
-			return remoteHost
-		}
-	}
-
-	xff := c.GetHeader("X-Forwarded-For")
-	if xff != "" {
-		parts := strings.Split(xff, ",")
-		// 从右往左找第一个非私有值：CF 场景 = 真实客户端；直连伪造 = 最右伪造值（已知权衡）
-		for i := len(parts) - 1; i >= 0; i-- {
-			cand := strings.TrimSpace(parts[i])
-			if cand != "" && !isPrivateIP(cand) {
-				return cand
+	if trustedProxiesEnabled && trustedProxies[remoteHost] {
+		xff := c.GetHeader("X-Forwarded-For")
+		if xff != "" {
+			parts := strings.Split(xff, ",")
+			for i := len(parts) - 1; i >= 0; i-- {
+				cand := strings.TrimSpace(parts[i])
+				if cand != "" && !isPrivateIP(cand) {
+					return cand
+				}
 			}
 		}
 	}
