@@ -329,8 +329,9 @@ func (app *App) pageAuthMiddleware() gin.HandlerFunc {
 		}
 
 		// 如果是通过 Query 带参访问的，顺手帮浏览器种下 Cookie
+		// httpOnly=true 防 XSS 窃取；SameSite=Lax 防跨站请求
 		if err != nil && apiKey != "" {
-			c.SetCookie("scp_api_key", apiKey, 2592000, "/", "", false, false)
+			c.SetCookie("scp_api_key", apiKey, 2592000, "/", "", true, true)
 		}
 
 		c.Next()

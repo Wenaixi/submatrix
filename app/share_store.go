@@ -164,8 +164,11 @@ func (s *ShareStore) Delete(id string) bool {
 		return false
 	}
 	delete(s.shares, id)
+	// 连带删除统计，避免删分享后 stats 残留（含 IP 历史）在内存/磁盘无限积累
+	delete(s.stats, id)
 	s.dirty = true
 	s.save()
+	s.saveStats()
 	slog.Info("分享已删除", "id", id)
 	return true
 }

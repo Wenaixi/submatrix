@@ -119,6 +119,8 @@ func (app *App) Initialize() error {
 
 	// 初始化分享存储（全新按组分发子系统，不做旧版兼容）
 	GetShareStore()
+	// 初始化可信代理白名单（分享限速/统计的 XFF 信任依据）
+	configureTrustedProxies(config.GlobalConfig.TrustedProxyIPs)
 
 	httpPortAvailable, subStorePortAvailable := app.CheckPortConflict()
 
@@ -232,6 +234,15 @@ func (app *App) Run() {
 	}()
 
 	app.setTimer()
+
+	// 分享统计定期落盘（每 30 秒；退出时 Shutdown 也会 Flush）
+	shareFlushTicker := time.NewTicker(30 * time.Second)
+	go func() {
+		for range shareFlushTicker.C {
+			GetShareStore().Flush()
+		}
+	}()
+	defer shareFlushTicker.Stop()
 
 	if config.GlobalConfig.CronExpression == "" {
 		app.triggerCheck()
@@ -523,6 +534,9 @@ func cleanupMihomo() {
 // Shutdown 尝试优雅关闭所有子服务与资源
 func (app *App) Shutdown() error {
 	slog.Debug("开始关闭应用...")
+
+	// 退出前刷分享统计落盘（防丢统计）
+	GetShareStore().Flush()
 
 	var lastErr error
 

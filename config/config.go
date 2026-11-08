@@ -192,6 +192,11 @@ type Config struct {
 	EnableWebUI           bool     `yaml:"enable-web-ui"`
 	APIKey                string   `yaml:"api-key"`
 	SharePassword         string   `yaml:"share-password"`
+
+	// TrustedProxyIPs 可信代理 IP 白名单（如 Cloudflare 边缘 IP 段）。
+	// 非空时分享限速/统计仅在来源命中白名单时才信任 X-Forwarded-For，防伪造绕过。
+	TrustedProxyIPs []string `yaml:"trusted-proxy-ips"`
+
 	CallbackScript        string   `yaml:"callback-script"`
 	SystemProxy           string   `yaml:"system-proxy"`
 	GithubProxy           string   `yaml:"github-proxy"`

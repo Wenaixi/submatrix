@@ -71,20 +71,51 @@ func allowRequest(ip, code string) bool {
 // getClientIP 优先取 X-Forwarded-For 最左值，但若为私有/回环则忽略（防伪造）；
 // 回退 RemoteAddr。
 func getClientIP(c *gin.Context) string {
-	xff := c.GetHeader("X-Forwarded-For")
-	if xff != "" {
-		// 取最左（客户端原始 IP，Cloudflare 隧道追加在其后）
-		first := strings.TrimSpace(strings.Split(xff, ",")[0])
-		if first != "" && !isPrivateIP(first) {
-			return first
+	// 默认：信任 XFF 最右非私有值（兼容 Cloudflare 隧道：CF 把真实客户端 IP 追加在最后）。
+	// 若配置了 trusted-proxy-ips 白名单，则仅当 RemoteAddr 命中白名单时才信 XFF（严格模式）。
+	remoteHost, _, err := net.SplitHostPort(c.Request.RemoteAddr)
+	if err != nil {
+		remoteHost = c.Request.RemoteAddr
+	}
+
+	if trustedProxiesEnabled {
+		// 严格模式：只有可信代理转发的请求才信 XFF
+		if !trustedProxies[remoteHost] {
+			return remoteHost
 		}
 	}
-	// 回退 RemoteAddr（host:port 形式）
-	host, _, err := net.SplitHostPort(c.Request.RemoteAddr)
-	if err == nil {
-		return host
+
+	xff := c.GetHeader("X-Forwarded-For")
+	if xff != "" {
+		parts := strings.Split(xff, ",")
+		// 从右往左找第一个非私有值：CF 场景 = 真实客户端；直连伪造 = 最右伪造值（已知权衡）
+		for i := len(parts) - 1; i >= 0; i-- {
+			cand := strings.TrimSpace(parts[i])
+			if cand != "" && !isPrivateIP(cand) {
+				return cand
+			}
+		}
 	}
-	return c.Request.RemoteAddr
+	return remoteHost
+}
+
+// trustedProxies 可信代理 IP 白名单（配置 trusted-proxy-ips 填充）。
+// 空 = 默认宽松模式（信 XFF 最右）；非空 = 严格模式（仅白名单来源信 XFF）。
+var (
+	trustedProxies      = map[string]bool{}
+	trustedProxiesEnabled bool
+)
+
+// configureTrustedProxies 从配置填充可信代理白名单。
+func configureTrustedProxies(ips []string) {
+	trustedProxies = make(map[string]bool, len(ips))
+	for _, ip := range ips {
+		ip = strings.TrimSpace(ip)
+		if ip != "" {
+			trustedProxies[ip] = true
+		}
+	}
+	trustedProxiesEnabled = len(trustedProxies) > 0
 }
 
 // isPrivateIP 判断 IP 是否为私有/回环/链路本地（不可信 XFF 来源）。
@@ -155,7 +186,8 @@ func serveShareFile(c *gin.Context, code, fileName, clientIP string) {
 		return
 	}
 	if _, err := os.Stat(absPath); os.IsNotExist(err) {
-		c.String(http.StatusNotFound, "文件不存在")
+		// 文件不存在统一 403（与分享不存在/停用同响应，防文件存在性探测）
+		c.String(http.StatusForbidden, "分享不存在或已停用")
 		return
 	}
 
@@ -182,7 +214,9 @@ func (app *App) registerGroupShareRoutes(router *gin.Engine) {
 			HeaderColor: "var(--accent)",
 			HeaderIcon:  templateHTML(svgShieldCheck),
 			HeaderTitle: "分享已启用",
-			Description: templateHTML("此分享受分享码保护。文件直链需带 <code>?code=&lt;分享码&gt;</code> 参数，例如：<code>/share/"+code+"/all.yaml?code=&lt;分享码&gt;</code>"),
+			// 注意：code 来自 URL，只经 ShareCode 字段转义插值进入模板，
+			// 绝不拼进 templateHTML 字符串（防反射型 XSS）。
+			Description: templateHTML("此分享受分享码保护。文件直链需带 <code>?code=&lt;分享码&gt;</code> 参数。"),
 			BadgeStyle:  "success",
 			BadgeText:   "Share",
 			ShareCode:   code,
