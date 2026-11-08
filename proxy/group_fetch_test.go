@@ -113,3 +113,44 @@ func TestFetchGroupProxiesEmptyURLs(t *testing.T) {
 		t.Fatalf("空 URL 组应报错, got %v", err)
 	}
 }
+func TestExpandGroupRelativeURLPathTraversal(t *testing.T) {
+	// 极端：相对路径含 ../ 穿越 —— 应生成畸形 URL 但至少不 panic，
+	// 实际会被网关白名单拦截（组名只允许 [A-Za-z0-9_-]），这里验证展开不引入额外危险
+	withGlobalOpts(t, config.Config{PublicURL: "https://sub-s.wenxi.dev", APIKey: "k"})
+
+	// ../ 在路径里，展开后仍含 ../，需由网关的组名校验兜底
+	got, err := expandGroupRelativeURL("/group/../../etc/passwd")
+	if err != nil {
+		t.Fatalf("含 ../ 不应报错（网关层拦截）: %v", err)
+	}
+	if got == "" {
+		t.Fatalf("展开结果不能为空")
+	}
+	t.Logf("含 ../ 展开为: %s（网关 /group/:name 会拦截非法组名）", got)
+}
+
+func TestExpandGroupRelativeURLTokenNotDuplicated(t *testing.T) {
+	// 极端：相对路径 URL 本身已带 ?token= 参数 —— 不应重复附加
+	// 实际相对路径（/ 开头）不会带 query，但防御性验证绝对地址
+	withGlobalOpts(t, config.Config{PublicURL: "https://sub-s.wenxi.dev", APIKey: "k"})
+
+	got, err := expandGroupRelativeURL("https://example.com/sub.yaml?token=preset")
+	if err != nil {
+		t.Fatalf("绝对地址带 token 不应报错: %v", err)
+	}
+	if got != "https://example.com/sub.yaml?token=preset" {
+		t.Fatalf("带 token 绝对地址应原样保留, 实际 %s", got)
+	}
+}
+
+func TestExpandGroupRelativeURLPublicURLTrailingSlash(t *testing.T) {
+	// 极端：public-url 带多个尾部斜杠
+	withGlobalOpts(t, config.Config{PublicURL: "https://sub-s.wenxi.dev///", APIKey: "k"})
+	got, err := expandGroupRelativeURL("/group/a/all.yaml")
+	if err != nil {
+		t.Fatalf("尾部斜杠不应报错: %v", err)
+	}
+	if got != "https://sub-s.wenxi.dev/group/a/all.yaml?token=k" {
+		t.Fatalf("尾部斜杠应归一, 实际 %s", got)
+	}
+}

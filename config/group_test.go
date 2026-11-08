@@ -95,3 +95,39 @@ func names(gs []ResolvedGroupConfig) []string {
 	}
 	return out
 }
+
+func TestResolveAllGroupsPriorityEdge(t *testing.T) {
+	// 极端：负数 priority、同 priority、零值混合排序
+	g := Config{
+		Groups: []GroupConfig{
+			{Name: "neg", URLs: []string{"https://neg"}, Priority: -5},
+			{Name: "zero", URLs: []string{"https://zero"}, Priority: 0},
+			{Name: "same1", URLs: []string{"https://s1"}, Priority: 10},
+			{Name: "same2", URLs: []string{"https://s2"}, Priority: 10},
+			{Name: "large", URLs: []string{"https://lg"}, Priority: 900},
+		},
+	}
+	got := ResolveAllGroups(g)
+	want := []string{"neg", "zero", "same1", "same2", "large"} // 负数最前，同值稳定
+	for i, w := range want {
+		if got[i].Name != w {
+			t.Fatalf("极端排序错: got[%d]=%s want %s (全序 %v)", i, got[i].Name, w, names(got))
+		}
+	}
+}
+
+func TestFindGroupByTagOrURLNoMatch(t *testing.T) {
+	// 极端：无匹配的 tag/URL 应回退第一个组而非 panic
+	cfg := Config{
+		Groups: []GroupConfig{
+			{Name: "g1", URLs: []string{"https://g1"}},
+		},
+	}
+	GlobalConfig = &cfg
+	defer func() { GlobalConfig = &Config{} }()
+
+	got := FindGroupByTagOrURL("不存在", "https://nope")
+	if got.Name != "g1" {
+		t.Fatalf("无匹配应回退第一个组 g1, 实际 %s", got.Name)
+	}
+}
