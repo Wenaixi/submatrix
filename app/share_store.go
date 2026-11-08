@@ -150,8 +150,8 @@ func (s *ShareStore) Create(group, note string, expiresAt time.Time, files []str
 		seenIPs: make(map[string]struct{}),
 	}
 	s.dirty = true
+	s.save() // 持锁态调用（save 已改为无锁内部版）
 	s.mu.Unlock()
-	s.save()
 	slog.Info("分享已创建", "id", code, "组", group)
 	return sh, nil
 }
@@ -266,10 +266,8 @@ func atomicWriteFile(path string, data []byte) error {
 	return os.Rename(tmp, path)
 }
 
-// save 落盘 shares.json（仅 dirty 时）。
+// save 落盘 shares.json（仅 dirty 时）。调用方必须已持有 s.mu。
 func (s *ShareStore) save() {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
 	if !s.dirty {
 		return
 	}
@@ -288,8 +286,6 @@ func (s *ShareStore) save() {
 
 // saveStats 落盘 share_stats.json（独立频控，由 Flush 调用）。
 func (s *ShareStore) saveStats() {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
 	list := make([]*ShareStats, 0, len(s.stats))
 	for _, st := range s.stats {
 		list = append(list, st)
@@ -305,9 +301,9 @@ func (s *ShareStore) saveStats() {
 func (s *ShareStore) Flush() {
 	s.mu.Lock()
 	s.dirty = true // 强制写 stats
+	s.save()       // 持锁态调用
+	s.saveStats()  // 持锁态调用
 	s.mu.Unlock()
-	s.save()
-	s.saveStats()
 }
 
 // load 从磁盘加载（shares.json + share_stats.json）。
