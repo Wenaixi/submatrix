@@ -14,6 +14,7 @@ import { MonitorView } from './views/MonitorView';
 import { FilesView } from './views/FilesView';
 import { AnalysisView } from './views/AnalysisView';
 import { ConfigView } from './views/ConfigView';
+import { SharesView } from './views/SharesView';
 import { useToast } from './components/Toast';
 import {
   Layers,
@@ -27,8 +28,8 @@ import {
   KeyRound,
   Github,
   Sun,
-  Moon
-} from 'lucide-react';
+  Moon,
+  Share2 } from 'lucide-react';
 
 export const App: React.FC = () => {
   const { showToast } = useToast();
@@ -44,7 +45,7 @@ export const App: React.FC = () => {
     return 'groups';
   };
 
-  const [activeTab, setActiveTab] = useState<'groups' | 'subs' | 'monitor' | 'files' | 'analysis' | 'config'>(parseTab);
+  const [activeTab, setActiveTab] = useState<'groups' | 'subs' | 'monitor' | 'files' | 'analysis' | 'shares' | 'config'>(parseTab);
 
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     return (localStorage.getItem('submatrix_theme') as 'light' | 'dark') || 'light';
@@ -75,7 +76,7 @@ export const App: React.FC = () => {
     };
   }, []);
 
-  const switchTab = (tabId: 'groups' | 'subs' | 'monitor' | 'files' | 'analysis' | 'config') => {
+  const switchTab = (tabId: 'groups' | 'subs' | 'monitor' | 'files' | 'analysis' | 'shares' | 'config') => {
     setActiveTab(tabId);
     window.location.hash = tabId === 'groups' ? '' : tabId;
   };
@@ -139,6 +140,7 @@ export const App: React.FC = () => {
     { id: 'monitor', label: '运行日志', icon: Activity },
     { id: 'files', label: '本地文件', icon: FolderClosed },
     { id: 'analysis', label: '节点统计', icon: BarChart2 },
+    { id: 'shares', label: '分享管理', icon: Share2 },
     { id: 'config', label: '系统设置', icon: Settings },
   ] as const;
 
@@ -320,6 +322,7 @@ export const App: React.FC = () => {
           {activeTab === 'monitor' && <MonitorView />}
           {activeTab === 'files' && <FilesView />}
           {activeTab === 'analysis' && <AnalysisView />}
+          {activeTab === 'shares' && <SharesView groups={groups} />}
           {activeTab === 'config' && <ConfigView />}
         </main>
       </div>

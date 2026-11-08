@@ -120,6 +120,9 @@ func (app *App) initHTTPServer() error {
 		slog.Error("注册分享路由失败", "error", err)
 	}
 
+	// 注册按组分发分享路由（/share/:code，独立于旧 /sub 加密分享）
+	app.registerGroupShareRoutes(router)
+
 	// 注册WebUI 路由
 	if !config.GlobalConfig.EnableWebUI {
 		if config.GlobalConfig.APIKey == "" {
@@ -382,6 +385,13 @@ func (app *App) registerAPIRoutes(router *gin.Engine) {
 		api.POST("/groups/toggle", app.toggleGroupHandler)
 		api.POST("/notify/test", app.notifyTestHandler)
 		api.POST("/substore/update", app.updateSubStoreHandler)
+
+		// 分享管理
+		api.GET("/shares", app.listSharesHandler)
+		api.POST("/shares", app.createShareHandler)
+		api.POST("/shares/toggle", app.toggleShareHandler)
+		api.POST("/shares/delete", app.deleteShareHandler)
+		api.GET("/shares/stats", app.shareStatsHandler)
 
 		api.GET("/files-data", app.getFilesData)
 	}

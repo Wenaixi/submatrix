@@ -116,6 +116,10 @@ func (app *App) Initialize() error {
 	if err := app.InitConfigLoad(); err != nil {
 		return err
 	}
+
+	// 初始化分享存储（全新按组分发子系统，不做旧版兼容）
+	GetShareStore()
+
 	httpPortAvailable, subStorePortAvailable := app.CheckPortConflict()
 
 	if config.GlobalConfig.ListenPort != "" && !httpPortAvailable {

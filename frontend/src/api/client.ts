@@ -222,3 +222,49 @@ export const saveConfig = (content: string) => apiRequest("/api/config", {
   method: "POST",
   body: JSON.stringify({ content })
 });
+
+// 7. 分享管理
+export interface ShareItem {
+  id: string;
+  group: string;
+  enabled: boolean;
+  note: string;
+  created_at: string;
+  expires_at: string;
+  files: string[];
+  total_hits: number;
+  unique_ips: number;
+  last_hit: string;
+  per_file: Record<string, number>;
+  link: string;
+}
+
+export interface SharesResponse {
+  shares: ShareItem[];
+}
+
+export interface ShareIPHit {
+  ip: string;
+  time: string;
+  file: string;
+  ua: string;
+}
+
+export interface ShareStatsResponse {
+  share_id: string;
+  total_hits: number;
+  unique_ips: number;
+  last_hit: string;
+  per_file: Record<string, number>;
+  ip_history: ShareIPHit[];
+}
+
+export const getShares = () => apiRequest<SharesResponse>("/api/shares");
+export const createShare = (payload: { group: string; note?: string; expires_at?: string; files?: string[] }) =>
+  apiRequest("/api/shares", { method: "POST", body: JSON.stringify(payload) });
+export const toggleShare = (id: string, enabled: boolean) =>
+  apiRequest("/api/shares/toggle", { method: "POST", body: JSON.stringify({ id, enabled }) });
+export const deleteShare = (id: string) =>
+  apiRequest("/api/shares/delete", { method: "POST", body: JSON.stringify({ id }) });
+export const getShareStats = (code: string) =>
+  apiRequest<ShareStatsResponse>(`/api/shares/stats?code=${encodeURIComponent(code)}`);
