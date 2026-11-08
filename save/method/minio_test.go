@@ -1,12 +1,17 @@
 package method
 
 import (
+	"os"
 	"testing"
 
 	"github.com/Wenaixi/submatrix/config"
 )
 
 func TestUploadToS3(t *testing.T) {
+	// 需要本地 MinIO 服务（127.0.0.1:9000），设置 MINIO_TEST=1 才运行
+	if os.Getenv("MINIO_TEST") == "" {
+		t.Skip("跳过 MinIO 测试（设置 MINIO_TEST=1 且本机 9000 端口运行 MinIO 时启用）")
+	}
 	config.GlobalConfig.S3Endpoint = "127.0.0.1:9000"
 	config.GlobalConfig.S3AccessID = "123"
 	config.GlobalConfig.S3SecretKey = "123"

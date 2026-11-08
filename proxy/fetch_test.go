@@ -87,13 +87,20 @@ func TestFetchOnceReadsTextBody(t *testing.T) {
 
 func TestFetchOnceShortBody(t *testing.T) {
 	ClearCache()
-	// 小于 sniffBytes 的响应体：必须原样返回
-	for _, body := range []string{"", "a", "short subscription"} {
+	// 小于 sniffBytes 的响应体：非空必须原样返回；空响应体按设计判为「空订阅」永久失败
+	for _, body := range []string{"a", "short subscription"} {
 		s := newTestServer(t, func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, body) })
 		got, fail := fetchOnce(s.URL, false, 10, "test-ua")
 		if fail != nil || string(got) != body {
 			t.Fatalf("body=%q: got=%q fail=%+v", body, got, fail)
 		}
+	}
+
+	// 空响应体：应判为 failPermanent（空订阅错误），而非成功
+	emptySrv := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {})
+	_, fail := fetchOnce(emptySrv.URL, false, 10, "test-ua")
+	if fail == nil || fail.class != failPermanent {
+		t.Fatalf("空 body 应为 failPermanent, got %+v", fail)
 	}
 }
 

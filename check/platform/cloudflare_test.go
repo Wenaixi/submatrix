@@ -3,6 +3,7 @@ package platform
 import (
 	"context"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 )
@@ -27,6 +28,10 @@ func TestFetchCFTrace(t *testing.T) {
 }
 
 func TestGetCFTrace(t *testing.T) {
+	// 需要真实外网访问 Cloudflare，设置 NETWORK_TEST=1 才运行
+	if os.Getenv("NETWORK_TEST") == "" {
+		t.Skip("跳过外网测试（设置 NETWORK_TEST=1 启用）")
+	}
 	httpClient := &http.Client{Timeout: 10 * time.Second}
 	loc, ip := GetCFTrace(httpClient)
 	if loc == "" || ip == "" {
@@ -37,6 +42,10 @@ func TestGetCFTrace(t *testing.T) {
 }
 
 func TestCheckCloudflare(t *testing.T) {
+	// 需要真实外网访问 cloudflare.com，设置 NETWORK_TEST=1 才运行
+	if os.Getenv("NETWORK_TEST") == "" {
+		t.Skip("跳过外网测试（设置 NETWORK_TEST=1 启用）")
+	}
 	client := &http.Client{Timeout: 10 * time.Second}
 	ok, loc, ip := CheckCloudflare(client)
 	if ok {

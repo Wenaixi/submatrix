@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"os"
 	"testing"
 
 	"github.com/Wenaixi/submatrix/config"
@@ -21,6 +22,10 @@ func withTestConfig() {
 }
 
 func TestNotify(t *testing.T) {
+	// 需要真实 Apprise 服务与有效通知渠道；设置 NOTIFY_TEST=1 且配置 TestURLs 才运行
+	if os.Getenv("NOTIFY_TEST") == "" || len(TestURLs) == 0 {
+		t.Skip("跳过通知测试（设置 NOTIFY_TEST=1 并填写 TestURLs 时启用）")
+	}
 	withTestConfig()
 
 	req := NotifyRequest{
