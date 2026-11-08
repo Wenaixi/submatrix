@@ -59,3 +59,5 @@ config/cache/
 
 # OMC 运行时状态
 .omc/
+shares.json
+share_stats.json
