@@ -686,6 +686,7 @@ func (pc *ProxyChecker) distributeJobs(proxies []map[string]any, ctx context.Con
 					pc.pt.CountAlive(true)
 					r := Result{Proxy: mapping}
 					pc.scoreAndRecycle(mapping, "success", 0, &r)
+					pc.resultChan <- r
 					continue
 				}
 
@@ -694,6 +695,7 @@ func (pc *ProxyChecker) distributeJobs(proxies []map[string]any, ctx context.Con
 					pc.pt.CountAlive(true)
 					r := Result{Proxy: mapping}
 					pc.scoreAndRecycle(mapping, "success", 0, &r)
+					pc.resultChan <- r
 					continue
 				}
 
