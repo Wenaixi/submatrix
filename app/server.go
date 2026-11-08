@@ -50,6 +50,11 @@ const (
 	APIAuthHeader   = "X-API-Key"
 	HeaderFromCheck = "X-From-Subs-Check-pro"
 	QueryFromCheck  = "from_subs_check_pro"
+
+	// defaultAPIKeyLiteral 是模板内置 Provider 直链中的 token 占位值。
+	// gateway 判断当前访问 token 是否等于它：等于则不做替换（本就是默认 key）。
+	// 若运行配置的 api-key 仍是这个字面值，替换逻辑自然跳过。
+	defaultAPIKeyLiteral = "wenxi-admin"
 )
 
 // publicStaticFileList 公共规则文件入口，无需鉴权

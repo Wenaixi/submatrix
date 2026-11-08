@@ -384,10 +384,7 @@ func writeGroupYAML(grp config.ResolvedGroupConfig, proxiesList []map[string]any
 		return
 	}
 
-	// 单组节点保留数量上限拦截
-	if grp.SuccessLimit > 0 && len(proxiesList) > int(grp.SuccessLimit) {
-		proxiesList = proxiesList[:grp.SuccessLimit]
-	}
+	// 节点上限已在 SaveGroup 截取（本函数为内部落盘点，不再重复截取）
 
 	allYamlData, err := yaml.Marshal(map[string]any{"proxies": proxiesList})
 	if err == nil {

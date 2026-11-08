@@ -28,7 +28,6 @@ func main() {
 			setCmd,
 			groupsCmd,
 			presetsCmd,
-			splitCmd,
 		},
 	}
 

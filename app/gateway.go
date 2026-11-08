@@ -111,8 +111,8 @@ func RegisterGroupRoutes(router *gin.Engine, outputPath string, authMiddleware g
 				// 动态替换 Provider 直链的基准网络地址与鉴权 Token
 				content = strings.ReplaceAll(content, "http://127.0.0.1:8199", baseURL)
 				content = strings.ReplaceAll(content, "https://127.0.0.1:8199", baseURL)
-				if token != "" && token != "wenxi-admin" {
-					content = strings.ReplaceAll(content, "token=wenxi-admin", "token="+token)
+				if token != "" && token != defaultAPIKeyLiteral {
+					content = strings.ReplaceAll(content, "token="+defaultAPIKeyLiteral, "token="+token)
 				}
 
 				c.Header("Content-Type", "text/plain; charset=utf-8")
