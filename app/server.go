@@ -1017,6 +1017,13 @@ func (app *App) saveGroupsHandler(c *gin.Context) {
 			return
 		}
 		seen[trimmed] = true
+
+		// 完整性守卫：组必须至少一个订阅 URL。
+		// 防「只发部分字段的 payload」把整个 groups 列表覆盖成空壳（渗透确认的高危）。
+		if len(g.URLs) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "组必须包含至少一个订阅 URL: " + trimmed})
+			return
+		}
 	}
 
 	// 读取现有 yaml
