@@ -1470,8 +1470,14 @@ func CreateClient(mapping map[string]any) (client *ProxyClient) {
 
 	baseTransport := &http.Transport{
 		DialContext: func(reqCtx context.Context, network, addr string) (net.Conn, error) {
-			// 基于请求的 ctx 创建合并 ctx
-			mergedCtx, mergedCancel := context.WithCancel(reqCtx)
+			// 【修复 2026-11-12】用 WithTimeout 而非仅 WithCancel：
+			// 给拨号+握手设硬超时（默认 15s，可被后续拨号更快返回覆盖），
+			// 防止 mProxy 内部 uTLS 握手 socket 读永久阻塞（大规模检测卡死根因）。
+			dialTimeout := 15 * time.Second
+			if cfgTmo := config.GlobalConfig.Timeout; cfgTmo > 0 {
+				dialTimeout = time.Duration(cfgTmo) * time.Millisecond
+			}
+			mergedCtx, mergedCancel := context.WithTimeout(reqCtx, dialTimeout)
 
 			// 使用 context.AfterFunc 监听全局 clientCtx
 			// 当 clientCtx (ProxyClient) 被关闭时，立即调用 mergedCancel
@@ -1502,6 +1508,14 @@ func CreateClient(mapping map[string]any) (client *ProxyClient) {
 			})
 			if err != nil {
 				return nil, err
+			}
+			// 【修复 2026-11-12】拨号成功但 uTLS 握手/首读可能仍卡：
+			// 给底层连接设硬 deadline（拨号超时 + 下载超时 + 余量），即使 mihomo 内部
+			// 握手不响应 ctx，连接 deadline 也会强制让阻塞的 Read/Write 返回。
+			// 设得足够长（含 download-timeout）以免误杀正常慢速测速连接。
+			if tc, ok := rawConn.(interface{ SetDeadline(time.Time) error }); ok {
+				hardDeadline := dialTimeout + time.Duration(config.GlobalConfig.DownloadTimeout+15)*time.Second
+				_ = tc.SetDeadline(time.Now().Add(hardDeadline))
 			}
 
 			cc := &countingConn{
