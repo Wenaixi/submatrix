@@ -17,8 +17,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/metacubex/mihomo/common/convert"
 	"github.com/Wenaixi/submatrix/config"
+	"github.com/metacubex/mihomo/common/convert"
 )
 
 // CheckProxyResult 代理检测结果
@@ -76,6 +76,22 @@ func IsLocalURL(urlStr string) bool {
 
 	ip := net.ParseIP(host)
 	if ip == nil {
+		// 【安全修复 2026-11-10】域名（字面非 IP）必须解析 DNS 验证：
+		// 拦截 127.0.0.1.nip.io、169.254.169.254.nip.io 这类「解析到回环/私有的域名」，
+		// 修掉 IsLocalURL 只看文本不查 DNS 的 SSRF 绕过（HIGH）。
+		// 使用 ResolveIPAddr 走系统 DNS；超时兜底保守拦截（宁可误拦不可漏防）。
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		addrs, resErr := net.DefaultResolver.LookupIPAddr(ctx, host)
+		if resErr != nil {
+			// 解析失败：保守视为本地，拒绝放行（宁严勿松）
+			return true
+		}
+		for _, a := range addrs {
+			if a.IP.IsLoopback() || a.IP.IsPrivate() || a.IP.IsLinkLocalUnicast() || a.IP.IsLinkLocalMulticast() {
+				return true
+			}
+		}
 		return false
 	}
 

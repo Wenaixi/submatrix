@@ -16,11 +16,12 @@ import (
 // ---------- 常量 ----------
 
 // shareAllowedFiles 分享可暴露的文件白名单（防任意文件泄漏）。
+// 【安全修复 2026-11-10】mihomo.yaml / history.yaml 从白名单移除：
+// mihomo.yaml 内嵌真实 API key（groupProviderURL 写入 token=），history.yaml 保留上游订阅原始 URL（sub_url 含 token），
+// 仅凭分享码即可拉取 = 分享码即管理员钥匙（CRITICAL）。
 var shareAllowedFiles = map[string]bool{
-	"all.yaml":      true,
-	"all-raw.yaml":  true,
-	"history.yaml":  true,
-	"mihomo.yaml":   true,
+	"all.yaml":     true,
+	"all-raw.yaml": true,
 }
 
 // rateLimit 每分钟每 IP 每分享的拉取上限（防刷）。
@@ -29,7 +30,7 @@ const rateLimitPerMin = 60
 // ---------- 速率限制（内存 token bucket / 固定窗口） ----------
 
 type rateKey struct {
-	ip  string
+	ip   string
 	code string
 }
 
@@ -39,8 +40,8 @@ type rateEntry struct {
 }
 
 var (
-	rateMu    sync.Mutex
-	rateMap   = make(map[rateKey]*rateEntry)
+	rateMu  sync.Mutex
+	rateMap = make(map[rateKey]*rateEntry)
 )
 
 // allowRequest 检查请求是否在速率限制内；超限返回 false。
@@ -98,7 +99,7 @@ func getClientIP(c *gin.Context) string {
 // trustedProxies 可信代理 IP 白名单（配置 trusted-proxy-ips 填充）。
 // 空 = 默认宽松模式（信 XFF 最右）；非空 = 严格模式（仅白名单来源信 XFF）。
 var (
-	trustedProxies      = map[string]bool{}
+	trustedProxies        = map[string]bool{}
 	trustedProxiesEnabled bool
 )
 

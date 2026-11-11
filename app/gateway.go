@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gin-gonic/gin"
 	"github.com/Wenaixi/submatrix/config"
+	"github.com/gin-gonic/gin"
 )
 
 // UnifiedAuthMiddleware 提供全站统一鉴权中间件
@@ -18,9 +18,17 @@ import (
 // 1. URL Query 参数: ?token=xxx 或 ?api_key=xxx
 // 2. HTTP Header: X-API-Key: xxx
 // 3. HTTP Header: Authorization: Bearer xxx
+//
+// 【安全修复 2026-11-10】该函数改为运行时每次请求动态读取 config.GlobalConfig.APIKey，
+// 杜绝「中间件闭包捕获初始 key、配置热重载后旧 key 永久有效」的凭据轮换失效问题（CRITICAL）。
 func UnifiedAuthMiddleware(expectedKey string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if expectedKey == "" {
+		// 动态取当前有效 key：优先入参 expectedKey（兼容既有调用），否则实时读全局配置
+		currentKey := expectedKey
+		if config.GlobalConfig != nil && config.GlobalConfig.APIKey != "" {
+			currentKey = config.GlobalConfig.APIKey
+		}
+		if currentKey == "" {
 			c.Next()
 			return
 		}
@@ -39,7 +47,7 @@ func UnifiedAuthMiddleware(expectedKey string) gin.HandlerFunc {
 			}
 		}
 
-		if token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(expectedKey)) != 1 {
+		if token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(currentKey)) != 1 {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"code":    401,
 				"message": "API密钥无效或未提供，请通过 ?token=xxx、X-API-Key 或 Bearer Token 进行鉴权",

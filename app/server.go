@@ -23,14 +23,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/gin-gonic/gin"
-	"github.com/goccy/go-yaml"
-	"github.com/Wenaixi/submatrix/webui"
 	"github.com/Wenaixi/submatrix/check"
 	"github.com/Wenaixi/submatrix/config"
 	"github.com/Wenaixi/submatrix/save/method"
 	"github.com/Wenaixi/submatrix/substore"
 	"github.com/Wenaixi/submatrix/utils"
+	"github.com/Wenaixi/submatrix/webui"
+	"github.com/gin-gonic/gin"
+	"github.com/goccy/go-yaml"
 )
 
 const (
@@ -98,6 +98,15 @@ func (app *App) initHTTPServer() error {
 	router := gin.New()
 	router.Use(gin.Recovery())
 	router.Use(app.silentLoggerMiddleware())
+	// 【安全修复 2026-11-10】全站安全响应头：CSP + X-Frame-Options + nosniff + Referrer-Policy。
+	// 缓解存储型 XSS 落地执行、点击劫持（管理页/login 被 iframe 覆盖）等风险。
+	router.Use(func(c *gin.Context) {
+		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'")
+		c.Header("X-Frame-Options", "DENY")
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("Referrer-Policy", "no-referrer")
+		c.Next()
+	})
 
 	// 始终加载模板（share 页面不依赖 EnableWebUI）
 	router.SetHTMLTemplate(template.Must(template.New("").ParseFS(webui.TemplatesFS, TemplatePattern)))
@@ -179,7 +188,7 @@ func (app *App) initHTTPServer() error {
 	webUIURL := "http://localhost:" + strings.TrimPrefix(listenAddr, ":") + AdminPath
 
 	if config.GlobalConfig.EnableWebUI {
-		slog.Info("启用Web管理界面", "path", webUIURL, "api-key", config.GlobalConfig.APIKey)
+		slog.Info("启用Web管理界面", "path", webUIURL, "api-key", maskSecret(config.GlobalConfig.APIKey))
 		slog.Info("远程Web管理就绪", "info", "公网域名访问建议使用Cloudflare隧道映射")
 	} else {
 		slog.Info("HTTP 服务器启动", "port", strings.TrimPrefix(listenAddr, ":"))
@@ -331,7 +340,17 @@ func (app *App) pageAuthMiddleware() gin.HandlerFunc {
 		// 如果是通过 Query 带参访问的，顺手帮浏览器种下 Cookie
 		// httpOnly=true 防 XSS 窃取；SameSite=Lax 防跨站请求
 		if err != nil && apiKey != "" {
-			c.SetCookie("scp_api_key", apiKey, 2592000, "/", "", true, true)
+			// 通过原生 http.Cookie 设置 SameSite=Lax（gin SetCookie 无该参数）
+			// 【安全修复 2026-11-10】SameSite=Lax 防 CSRF 跨站提交。
+			http.SetCookie(c.Writer, &http.Cookie{
+				Name:     "scp_api_key",
+				Value:    apiKey,
+				Path:     "/",
+				MaxAge:   2592000,
+				HttpOnly: true,
+				Secure:   true,
+				SameSite: http.SameSiteLaxMode,
+			})
 		}
 
 		c.Next()
@@ -463,10 +482,49 @@ func (app *App) getConfig(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取配置文件失败" + err.Error()})
 		return
 	}
+	// 【安全修复 2026-11-10】响应脱敏：配置内 secrets（api-key/github-token/各类密码）不再明文下发。
+	// 前端管理页仍可读配置结构，但敏感值替换为占位符，避免「持 key 即读全站秘密」。
 	c.JSON(http.StatusOK, gin.H{
-		"content":        string(configData),
+		"content":        redactConfigSecrets(string(configData)),
 		"sub_store_path": config.GlobalConfig.SubStorePath,
 	})
+}
+
+// maskSecret 对密钥做掩码：保留前后各 2 位，中间用 *** 代替（短密钥全掩码）。
+func maskSecret(s string) string {
+	if s == "" {
+		return ""
+	}
+	if len(s) <= 4 {
+		return "***"
+	}
+	return s[:2] + "***" + s[len(s)-2:]
+}
+
+// redactConfigSecrets 对 YAML 配置文本中的敏感字段做占位替换（不破坏结构，仅掩码值）。
+func redactConfigSecrets(content string) string {
+	// 需要掩码的 YAML 键（行级匹配 key: value 或 key = value）
+	sensitiveKeys := []string{
+		"api-key", "github-token", "github-gist-id", "webdav-password",
+		"share-password", "s3-secret-key", "s3-access-key", "apprise-api-server",
+		"callback-script", "mihomo-overwrite-url",
+	}
+	out := content
+	for _, k := range sensitiveKeys {
+		re := regexp.MustCompile(`(?m)^(\s*` + regexp.QuoteMeta(k) + `\s*:\s*)(.+)$`)
+		out = re.ReplaceAllStringFunc(out, func(line string) string {
+			m := re.FindStringSubmatch(line)
+			if len(m) != 3 {
+				return line
+			}
+			// 空值/引号空值保持原样（不制造假密钥）
+			if strings.Trim(strings.TrimSpace(m[2]), `"'`) == "" {
+				return line
+			}
+			return m[1] + "***REDACTED***"
+		})
+	}
+	return out
 }
 
 // updateConfig 更新配置
@@ -975,12 +1033,10 @@ func (app *App) checkGhProxyHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
-
 // getGroupsHandler 获取当前所有分组配置与端口信息
 func (app *App) getGroupsHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"groups":     config.GlobalConfig.Groups,
-		"apiKey":     config.GlobalConfig.APIKey,
 		"listenPort": config.GlobalConfig.ListenPort,
 	})
 }
@@ -1097,4 +1153,3 @@ func (app *App) toggleGroupHandler(c *gin.Context) {
 		"enabled": req.Enabled,
 	})
 }
-

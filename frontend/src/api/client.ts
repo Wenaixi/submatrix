@@ -1,6 +1,8 @@
 // API Client for SubMatrix Go Core
 export function getApiKey(): string {
-  return localStorage.getItem("submatrix_api_key") || localStorage.getItem("apiKey") || "wenxi-admin";
+  // 【安全修复 2026-11-10】移除硬编码默认密钥 "wenxi-admin"：
+  // 必须由用户在登录页输入，未配置时返回空（让请求自然 401，不再默认放行）。
+  return localStorage.getItem("submatrix_api_key") || localStorage.getItem("apiKey") || "";
 }
 
 export function setApiKey(key: string) {

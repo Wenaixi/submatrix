@@ -28,7 +28,6 @@ func ReadFileIfExists(path string) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
-
 func mergeMihomoTemplate(templateData []byte, proxies []map[string]any) ([]byte, error) {
 	if len(strings.TrimSpace(string(templateData))) == 0 {
 		return nil, fmt.Errorf("mihomo 覆写模板为空")
@@ -52,8 +51,22 @@ func fetchMihomoTemplate() ([]byte, error) {
 		source = "http://127.0.0.1:8199/Mihomo-Rules-CDN.yaml"
 	}
 
+	// 【安全修复 2026-11-10】本地文件读取限制在 output/ 目录内，并拒绝绝对路径与 ..
+	// 修掉「mihomo-overwrite-url 写绝对路径 → os.ReadFile 任意文件读取」链（HIGH）。
 	if !strings.Contains(source, "://") {
-		return os.ReadFile(source)
+		// 仅允许相对路径（如 output/template.yaml），不允许绝对路径/盘符/上级目录。
+		// 统一在 output 根下解析，杜绝读任意文件。
+		if filepath.IsAbs(source) || strings.Contains(source, "..") || strings.Contains(source, ":") {
+			return nil, fmt.Errorf("本地模板路径不合法（仅允许 output/ 内相对路径）: %s", source)
+		}
+		localPath := filepath.Join("output", source)
+		return os.ReadFile(localPath)
+	}
+
+	// 仅允许 http/https 协议，杜绝 file:// / gopher:// 等（SSRF 加固）
+	u, err := url.Parse(source)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return nil, fmt.Errorf("模板地址协议不允许: %s", source)
 	}
 
 	if utils.IsLocalURL(source) {
@@ -181,7 +194,6 @@ func deduplicateByProxyKey(proxies []map[string]any) []map[string]any {
 
 	return result
 }
-
 
 // sanitizeProxyForYAML 清洗节点字典，防止外部源中由于 !!binary 导致的类型不匹配与序列化崩溃
 func sanitizeProxyForYAML(raw map[string]any) map[string]any {
@@ -316,7 +328,7 @@ func SaveGroup(grp config.ResolvedGroupConfig, results []check.Result, historyPo
 
 	// 1. 过滤 + 清洗本次结果（区分已检测与 skipped 保留节点）
 	proxiesList := make([]map[string]any, 0, len(results)) // 已检测（供客户端直用）
-	rawList := make([]map[string]any, 0, len(results))      // 全量（含 skipped 未检测）
+	rawList := make([]map[string]any, 0, len(results))     // 全量（含 skipped 未检测）
 	for _, r := range results {
 		if r.Proxy == nil {
 			continue
@@ -369,7 +381,6 @@ func SaveGroup(grp config.ResolvedGroupConfig, results []check.Result, historyPo
 	slog.Info("组产物已落盘", "组", grp.Name, "节点", len(proxiesList), "历史", len(historyPool))
 }
 
-
 // writeGroupYAML 把一组节点写入 groups/<name>/all.yaml 与 mihomo.yaml（按规则预设融合）。
 func writeGroupYAML(grp config.ResolvedGroupConfig, proxiesList []map[string]any) {
 	saver, err := method.NewLocalSaver()
@@ -404,4 +415,3 @@ func writeGroupYAML(grp config.ResolvedGroupConfig, proxiesList []map[string]any
 		_ = os.WriteFile(filepath.Join(groupDir, "mihomo.yaml"), allYamlData, 0644)
 	}
 }
-

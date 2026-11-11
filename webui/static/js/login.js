@@ -76,7 +76,20 @@
 
             // 根据传入参数回到之前的页面
             const urlParams = new URLSearchParams(window.location.search);
-            const redirectTarget = urlParams.get('redirect') || '/admin';
+            let redirectTarget = urlParams.get('redirect') || '/admin';
+            // 【安全修复 2026-11-10】开放重定向加固：仅允许站内相对路径跳转
+            // （拒绝 // 协议相对、\ 反斜杠、javascript: 等），防登录后钓鱼跳转。
+            try {
+                const u = new URL(redirectTarget, window.location.origin);
+                const allowed = (
+                    u.origin === window.location.origin &&
+                    !redirectTarget.startsWith('//') &&
+                    !redirectTarget.startsWith('\\')
+                );
+                if (!allowed) redirectTarget = '/admin';
+            } catch (e) {
+                redirectTarget = '/admin';
+            }
             window.location.replace(redirectTarget);
 
         } catch (e) {

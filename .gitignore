@@ -1,63 +1,134 @@
-# 忽略前端依赖和构建产物
+# ============================================================
+# SubMatrix .gitignore — 深度完善版（2026-11-11）
+# 分层：① 密钥与敏感  ② 运行时产物  ③ 构建/依赖  ④ 日志/缓存
+#        ⑤ 跨平台残留  ⑥ IDE/本地  ⑦ 明确追回的例外
+# ============================================================
+
+# ---------- ① 密钥与敏感（绝不入库） ----------
+# 真实配置（含 api-key/token/密码）一旦提交就是严重泄露事故
+config.yaml
+config/*.yaml
+!config/config.yaml.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.env
+.env.*
+!.env.example
+secrets.*
+*.secret
+credentials*
+
+# ---------- ② 运行时产物（落盘数据与检测产物） ----------
+# output/ 是检测落盘目录（all.yaml/mihomo.yaml/history.yaml/sub-store.json），
+# 内含明文节点（含密码）与统计，属运行时数据不入库。
+output/
+
+# 分享码与分享统计（运行时数据，可能含 IP/UA 历史）
+shares.json
+share_stats.json
+
+# substore 运行时数据
+sub-store.json
+sub-store.log
+sub-store/
+substore/*.json
+!substore/init.js
+
+# 结果缓存（含历史节点）
+config/cache/
+results.json
+*.ipdb
+
+# 规则模板运行时生成物（勿与 assets/ 源码混淆）
+mihomo.yaml
+
+# ---------- ③ 构建产物与依赖 ----------
 node_modules/
 **/node_modules/
 .pnpm-store/
-
-openipdb.ipdb
-config.yaml
-mihomo.yaml
-.golangci-lint.yml
-test
-
-dist/*
-output/*
-subs-check-pro*
-mihomo-check*
-log/
-
-.idea
-.vscode
-
-.DS_Store
-
-*.bak
-*.zip
-*.gz
-*.tar
-bin/
 dist/
-test_*.*
-test_*/
-speed_*.csv
-
-*.old
-*.new
-
+bin/
+build/
 *.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.o
 *.syso
 *.test
-.wiki/
+*.out
+*.prof
+# Linux/Mac 无扩展名主二进制（go build 产物）
+submatrix
+/submatrix
+coverage/
+.vite/
+frontend/dist/
+# 注：webui/static/dist/ 是已跟踪的运行必需资产（go:embed 静态资源），刻意不忽略。
 
-# 忽略 IDE 缓存
+# ---------- ④ 日志与缓存 ----------
+logs/
+log/
+*.log
+!substore/*.log
+subs-check-pro*
+mihomo-check*
+speed_*.csv
+monitor.csv
+*.cache
+
+# ---------- ⑤ 跨平台残留与事故产物 ----------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Windows 路径事故目录（分号导致的错误目录，历史遗留）
+config;C/
+output;C/
+
+# ---------- ⑥ 本地/IDE/OS ----------
 .idea/
 .vscode/
+*.swp
+*.swo
+*~
+.project
+.settings/
 
-!Subs-Check-PRO_OG.png
-monitor.ps1
-.gitignore
-monitor.csv
-monitor.sh
-
-screenshots/
-config/cache/
-
-!webui/static/dist/
-!webui/static/dist/*
-
-# 本地构建产物
-.local/
-
-# OMC 运行时状态
+# OMC 运行时状态（本地编排状态，不入库；另有项目级 skills 例外）
 .omc/
-shares.json
-share_stats.json
+.local/
+.claude/
+tmp/
+temp/
+*.tmp
+
+# 截图与演示产物
+screenshots/
+captures/
+
+# 测试与临时
+test_*/
+test_*.*
+speed_*.csv
+test
+*.old
+*.new
+*.bak
+*.orig
+*.rej
+
+# ---------- ⑦ 追回的例外（白名单，覆盖上面规则） ----------
+# 模板 assets（源码级规则集）必须入库
+!assets/
+!assets/**
+# 前端源码（非构建产物）必须入库
+!frontend/src/
+!frontend/package.json
+!frontend/package-lock.json
+# 构建产物目录保留占位文件（便于目录结构入库）
+!.gitkeep

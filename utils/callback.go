@@ -19,6 +19,26 @@ func ExecuteCallback(successCount int) {
 		return
 	}
 
+	// 【安全修复 2026-11-10】回调脚本白名单限制：只允许执行 output/ 目录下的脚本。
+	// 修掉「配置写 callback-script 指向任意路径 → 检测完成执行任意脚本」的 RCE 链（CRITICAL）。
+	// 允许根 = <程序运行目录>/output，同时兼容绝对路径下的 output 目录。
+	allowedRoot := filepath.Join("output")
+	absScript, err := filepath.Abs(callbackScript)
+	if err != nil {
+		slog.Error(fmt.Sprintf("回调脚本路径解析失败: %s", callbackScript))
+		return
+	}
+	absRoot, err := filepath.Abs(allowedRoot)
+	if err != nil {
+		slog.Error(fmt.Sprintf("回调脚本允许根解析失败: %s", allowedRoot))
+		return
+	}
+	// 要求脚本真实路径必须位于 allowedRoot 之内（前缀判断 + 边界分隔符，防 /output-evil 绕过）
+	if absScript != absRoot && !strings.HasPrefix(absScript, absRoot+string(filepath.Separator)) {
+		slog.Error(fmt.Sprintf("回调脚本不在允许目录(输出目录)内，已拒绝执行: %s", callbackScript))
+		return
+	}
+
 	slog.Info("执行回调脚本", "path", callbackScript)
 
 	// 检查脚本文件是否存在

@@ -10,6 +10,23 @@ import (
 	"github.com/Wenaixi/submatrix/utils"
 )
 
+// fetchGroupSubscription 解析组订阅：优先走流式解析（避免完整 AST 峰值内存放大，
+// 修掉 50MB 订阅 → 4.5GB 内存的 DoS）；流式未识别格式时回退到整体解析，行为与改动前一致。
+func fetchGroupSubscription(data []byte, subURL string) ([]map[string]any, error) {
+	var nodes []map[string]any
+	stats, err := parse.ParseSubscriptionDataStream(data, subURL, func(node map[string]any) bool {
+		if node != nil {
+			nodes = append(nodes, node)
+		}
+		return true
+	})
+	if err == nil && stats != nil && len(nodes) > 0 {
+		return nodes, nil
+	}
+	// 兜底：流式未识别（或空结果）时走原来的整体解析
+	return parse.ParseSubscriptionData(data, subURL)
+}
+
 // FetchGroupProxies 按单个组的配置拉取其全部 URL，合并去重后返回节点列表。
 //
 // 与全局 GetProxies 的差异：
@@ -48,7 +65,7 @@ func FetchGroupProxies(grp config.ResolvedGroupConfig) ([]map[string]any, int, e
 			continue
 		}
 
-		nodes, err := parse.ParseSubscriptionData(data, fetchURL)
+		nodes, err := fetchGroupSubscription(data, fetchURL)
 		if err != nil {
 			slog.Warn("组订阅解析失败，跳过", "组", grp.Name, "url", fetchURL, "err", err)
 			lastErr = err
