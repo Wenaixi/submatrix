@@ -70,10 +70,16 @@ func CheckSpeed(httpClient *http.Client, bucket *ratelimit.Bucket, getNetBytes f
 	slog.Debug("随机选择的测速URL", "url", url)
 
 	speedClient := *httpClient
-	speedClient.Timeout = 0
+	// 【修复 2026-11-12】不再把 Timeout 清零：保留 client 级 Timeout 作为最终兜底，
+	// 防止 context 超时在个别代理/连接上传导失败时导致 io.Copy 永久阻塞（测试复现卡死）。
+	timeout := time.Duration(downloadTimeoutSec) * time.Second
+	if timeout > 0 {
+		speedClient.Timeout = timeout
+	} else {
+		speedClient.Timeout = 30 * time.Second // 兜底 30s
+	}
 
 	// 下载需要根据配置文件设置较长的超时
-	timeout := time.Duration(downloadTimeoutSec) * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
