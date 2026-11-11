@@ -1040,8 +1040,10 @@ func (pc *ProxyChecker) collectResults() {
 
 // checkAlive 使用谷歌服务执行基本的存活检测。
 func checkAlive(job *ProxyJob, ctx context.Context) bool {
-	gstatic, err := platform.CheckGstatic(job.Client.Client, ctx)
-	if err == nil && gstatic {
+	// 【修复 2026-11-12】测活综合判断：gstatic 不通时回退 Cloudflare 端点，
+	// 避免容器内无法访问 Google 导致所有节点误判死亡（实测 0 可用根因）。
+	alive, err := platform.CheckAliveWithFallback(job.Client.Client, ctx)
+	if err == nil && alive {
 		return true
 	}
 	slog.Debug("测活出错", "Name", job.Client.mProxy.Name(), "error", err)
@@ -1470,9 +1472,10 @@ func CreateClient(mapping map[string]any) (client *ProxyClient) {
 
 	baseTransport := &http.Transport{
 		DialContext: func(reqCtx context.Context, network, addr string) (net.Conn, error) {
-			// 【修复 2026-11-12】用 WithTimeout 而非仅 WithCancel：
-			// 给拨号+握手设硬超时（默认 15s，可被后续拨号更快返回覆盖），
+			// 【修复 2026-11-12】拨号+握手用 ctx 硬超时（默认 15s，可被后续拨号更快返回覆盖），
 			// 防止 mProxy 内部 uTLS 握手 socket 读永久阻塞（大规模检测卡死根因）。
+			// 注意：不在此处给连接设永久 deadline——连接会被 http.Transport 复用做后续请求，
+			// 绝对 deadline 会误杀正常复用（测活+测速都走同一 transport）。
 			dialTimeout := 15 * time.Second
 			if cfgTmo := config.GlobalConfig.Timeout; cfgTmo > 0 {
 				dialTimeout = time.Duration(cfgTmo) * time.Millisecond
@@ -1508,14 +1511,6 @@ func CreateClient(mapping map[string]any) (client *ProxyClient) {
 			})
 			if err != nil {
 				return nil, err
-			}
-			// 【修复 2026-11-12】拨号成功但 uTLS 握手/首读可能仍卡：
-			// 给底层连接设硬 deadline（拨号超时 + 下载超时 + 余量），即使 mihomo 内部
-			// 握手不响应 ctx，连接 deadline 也会强制让阻塞的 Read/Write 返回。
-			// 设得足够长（含 download-timeout）以免误杀正常慢速测速连接。
-			if tc, ok := rawConn.(interface{ SetDeadline(time.Time) error }); ok {
-				hardDeadline := dialTimeout + time.Duration(config.GlobalConfig.DownloadTimeout+15)*time.Second
-				_ = tc.SetDeadline(time.Now().Add(hardDeadline))
 			}
 
 			cc := &countingConn{
