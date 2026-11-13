@@ -110,7 +110,15 @@ export const MonitorView: React.FC = () => {
           <div>
             <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>当前进度</div>
             <div style={{ fontSize: '15px', fontWeight: 500, fontFamily: 'var(--font-mono)' }}>
-              {status?.progress ? `${status.progress}%` : '0%'}
+              {(() => {
+                // 后端 progress 字段是“已完成个数”，总数在 proxyCount，须在此换算成百分比。
+                // 阶段切换时两者会同步变化（测活阶段是总订阅数，测速阶段是存活数），因此分母一致。
+                const done = status?.progress || 0;
+                const total = status?.proxyCount || 0;
+                if (total <= 0) return '0%';
+                const pct = Math.min(100, Math.max(0, (done / total) * 100));
+                return `${pct.toFixed(1)}%`;
+              })()}
             </div>
           </div>
           {status?.eta !== undefined && status.eta > 0 && (
