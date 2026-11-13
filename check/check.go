@@ -1281,12 +1281,12 @@ func (pc *ProxyChecker) updateProxyName(res *Result, httpClient *ProxyClient, sp
 			res.ISPTag = ispTag
 		}
 		if res.Country != "" {
-			res.Proxy["name"] = pc.grp.NodePrefix + proxyutils.Rename(res.Country, res.CountryCodeTag)
+			res.Proxy["name"] = pc.grp.NodePrefix + proxyutils.Rename(res.Country, res.CountryCodeTag, pc.grp.EnhancedTag)
 		} else {
 			// 位置确实取不到时：一律按未知处理，追加序号，绝不拼接原始名。
 			// 原始实现会无条件拼接 originName，导致「国旗+原始名滚雪球」的怪名叠字；
 			// append-original-name 开关在此没有消费方（上游行为），这里直接放弃拼接。
-			res.Proxy["name"] = pc.grp.NodePrefix + proxyutils.Rename("", "")
+			res.Proxy["name"] = pc.grp.NodePrefix + proxyutils.Rename("", "", pc.grp.EnhancedTag)
 		}
 	}
 

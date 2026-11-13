@@ -200,6 +200,11 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
           const minSpeed = g.MinSpeed ?? g.min_speed ?? g.minSpeed ?? 0;
           const overwriteURL = g.OverwriteURL ?? g.overwrite_url ?? g.overwriteUrl ?? "";
 
+          // 组级命名与打标扩展
+          const enhancedTag = (g.EnhancedTag ?? g.enhanced_tag ?? g.enhancedTag) === true;
+          const nodePrefix = g.NodePrefix ?? g.node_prefix ?? g.nodePrefix ?? "";
+          const ispCheck = (g.ISPCheck ?? g.isp_check ?? g.ispCheck) === true;
+
           // 订阅源
           const urls = g.URLs ?? g.urls ?? [];
           const urlsText = Array.isArray(urls) ? urls.join("\n") : "";
@@ -488,7 +493,53 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
                 )}
               </div>
 
-              {/* 阶梯 4：高级过滤、分流规则模板与单组参数 (折叠区) */}
+              {/* 组级命名与打标扩展：增强角标 / 节点名前缀 / ISP 类型检测 */}
+              <div style={{ display: 'grid', gridTemplateColumns: checkAlive ? '1fr 1fr 1fr' : '1fr 1fr', gap: '10px', padding: '10px 12px', background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }} title="显示 CF 状态角标：HK²=直连、HK¹⁺=CF同区、HK¹-US⁰=CF跨区">
+                    增强位置角标
+                    <InfoTooltip
+                      title="增强位置角标 (Enhanced Tag)"
+                      desc="在重命名后的节点名上补充 Cloudflare 状态角标，一眼分辨节点与 CF 的相对位置。"
+                      principle="依据节点域名解析出的 CF 边缘机房与节点自身地区做比对，按直连/同区/跨区三种关系生成上标。"
+                      recommend="走 Cloudflare 加速的节点建议开启；纯直连自建节点可关闭以保持名字简洁。"
+                    />
+                  </span>
+                  <Switch checked={enhancedTag} onChange={(c) => updateGroup(idx, { EnhancedTag: c, enhanced_tag: c })} />
+                </div>
+                <div>
+                  <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', marginBottom: '3px' }}>
+                    节点名前缀
+                    <InfoTooltip
+                      title="节点名前缀 (Node Prefix)"
+                      desc="给本组所有重命名后的节点加一段统一前缀，方便在客户端里成组识别。"
+                      principle="改名阶段先生成标准名称，再在名称最前方拼接该前缀字符串。"
+                      recommend="如填写“免费|”或“专线|”；留空表示不加前缀。"
+                    />
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="如：专线| / 免费| ，留空则不加前缀"
+                    value={nodePrefix}
+                    onChange={(e) => updateGroup(idx, { NodePrefix: e.target.value, node_prefix: e.target.value })}
+                  />
+                </div>
+                {checkAlive && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }} title="识别机房/住宅/移动等出口类型（需全局配置 API key）">
+                      ISP 类型检测
+                      <InfoTooltip
+                        title="ISP 类型检测 (ISP Check)"
+                        desc="识别节点出口属于机房、住宅还是移动网络，用于甄选家宽 IP。"
+                        principle="调用配置好的 ISP 情报 API 查询出口 IP 的归属组织与网络属性，并写入打标结果。"
+                        recommend="有流媒体或游戏防封需求时开启；需先在全局配置里填入 ISP 检测 API key。"
+                      />
+                    </span>
+                    <Switch checked={ispCheck} onChange={(c) => updateGroup(idx, { ISPCheck: c, isp_check: c })} />
+                  </div>
+                )}
+              </div>
+
               <details style={{ border: '1px solid var(--border)', background: 'var(--surface-1)' }}>
                 <summary style={{ padding: '8px 12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', userSelect: 'none' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>

@@ -27,6 +27,9 @@ type GroupConfig struct {
 	TagIPType          *bool    `json:"tag_ip_type" yaml:"tag-ip-type"`
 	RenameNode         *bool    `json:"rename_node" yaml:"rename-node"`
 	AppendOriginalName *bool    `json:"append_original_name" yaml:"append-original-name"`
+	EnhancedTag        *bool    `json:"enhanced_tag" yaml:"enhanced-tag"`
+	NodePrefix         *string  `json:"node_prefix" yaml:"node-prefix"`
+	ISPCheck           *bool    `json:"isp_check" yaml:"isp-check"`
 	DropOnFail         *bool    `json:"drop_on_fail" yaml:"drop-on-fail"`
 	RulePreset         string   `json:"rule_preset" yaml:"rule-preset"`
 	OverwriteURL       string   `json:"overwrite_url" yaml:"overwrite-url"`
@@ -52,6 +55,7 @@ type ResolvedGroupConfig struct {
 	TagIPType          bool
 	RenameNode         bool
 	AppendOriginalName bool
+	EnhancedTag        bool
 	DropOnFail         bool
 	RulePreset         string
 	OverwriteURL       string
@@ -134,6 +138,7 @@ func ResolveGroup(g GroupConfig, global Config) ResolvedGroupConfig {
 		Priority:           g.Priority,
 		RenameNode:         global.RenameNode,
 		AppendOriginalName: global.AppendOriginalName,
+		EnhancedTag:        global.EnhancedTag,
 		DropOnFail:         true,
 		RulePreset:         rulePreset,
 		OverwriteURL:       g.OverwriteURL,
@@ -173,6 +178,15 @@ func ResolveGroup(g GroupConfig, global Config) ResolvedGroupConfig {
 	if g.AppendOriginalName != nil {
 		res.AppendOriginalName = *g.AppendOriginalName
 	}
+	if g.EnhancedTag != nil {
+		res.EnhancedTag = *g.EnhancedTag
+	}
+	if g.NodePrefix != nil {
+		res.NodePrefix = *g.NodePrefix
+	}
+	if g.ISPCheck != nil {
+		res.ISPCheck = *g.ISPCheck
+	}
 	if g.DropOnFail != nil {
 		res.DropOnFail = *g.DropOnFail
 	}
@@ -208,6 +222,7 @@ func ResolveAllGroups(global Config) []ResolvedGroupConfig {
 				TagIPType:          global.TagIPType,
 				RenameNode:         global.RenameNode,
 				AppendOriginalName: global.AppendOriginalName,
+				EnhancedTag:        global.EnhancedTag,
 				RulePreset:         RulePresetProFull,
 				OverwriteURL:       "",
 				URLs:               cleanUrls,

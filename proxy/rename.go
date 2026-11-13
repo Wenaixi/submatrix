@@ -3,8 +3,6 @@ package proxies
 import (
 	"strconv"
 	"sync"
-
-	"github.com/Wenaixi/submatrix/config"
 )
 
 var (
@@ -12,11 +10,13 @@ var (
 	counterLock = sync.Mutex{}
 )
 
-func Rename(name, countryCodeTag string) string {
+// Rename 按国家代码生成带国旗与序号的节点名。
+// enhancedTag 由调用方传入组级配置，决定是否追加位置角标。
+func Rename(name, countryCodeTag string, enhancedTag bool) string {
 	flag := CountryCodeToFlag(name)
 
 	key, label := name, name
-	if config.GlobalConfig.EnhancedTag {
+	if enhancedTag {
 		if countryCodeTag != "" {
 			key, label = countryCodeTag, countryCodeTag
 		} else if name != "" {

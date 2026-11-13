@@ -26,10 +26,7 @@ const QUICK_GROUPS: { title: string; items: QuickSetting[] }[] = [
   {
     title: '检测参数',
     items: [
-      { key: 'min-speed', label: '最低测速门槛', hint: '低于此速度的节点判定为不合格；单位 KB/s', type: 'number', unit: 'KB/s' },
       { key: 'concurrent', label: '全局并发数', hint: '同时检测的节点数，过大会拖垮本机网络', type: 'number', unit: '个' },
-      { key: 'timeout', label: '连接超时', hint: '单节点握手超时时间；单位毫秒', type: 'number', unit: 'ms' },
-      { key: 'download-mb', label: '测速下载上限', hint: '每个节点最多下载多少数据用于测速', type: 'number', unit: 'MB' },
       { key: 'download-timeout', label: '测速超时', hint: '下载测速的最长等待时间', type: 'number', unit: '秒' },
     ],
   },
@@ -41,16 +38,7 @@ const QUICK_GROUPS: { title: string; items: QuickSetting[] }[] = [
       { key: 'speed-test-url', label: '测速地址', hint: '下载测速使用的文件地址，填 random 则自动挑选', type: 'text' },
     ],
   },
-  {
-    title: '命名与打标',
-    items: [
-      { key: 'rename-node', label: '按地区重命名', hint: '用 IP 定位结果重写节点名（国旗+地区+序号）', type: 'boolean' },
-      { key: 'enhanced-tag', label: '增强位置角标', hint: '显示 CF 状态角标：HK²=直连、HK¹⁺=CF同区、HK¹-US⁰=CF跨区', type: 'boolean' },
-      { key: 'node-prefix', label: '节点名前缀', hint: '给所有重命名后的节点加统一前缀', type: 'text' },
-      { key: 'media-check', label: '流媒体解锁检测', hint: '检测 Netflix/Disney/OpenAI 等平台可用性', type: 'boolean' },
-      { key: 'isp-check', label: 'ISP 类型检测', hint: '识别机房/住宅/移动等出口类型（需要 API key）', type: 'boolean' },
-    ],
-  },
+  // 组级命名/检测参数已下放到 GroupsView 的组编辑卡片，此处只保留影响整机的全局项
 ];
 
 // 从 YAML 文本中读取某个顶层标量的当前值（只处理简单 key: value 行）
