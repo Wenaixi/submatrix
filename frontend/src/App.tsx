@@ -317,6 +317,7 @@ export const App: React.FC = () => {
             <SubscriptionsView
               listenPort={listenPort}
               apiKey={apiKey}
+              groups={groups}
             />
           )}
           {activeTab === 'monitor' && <MonitorView />}

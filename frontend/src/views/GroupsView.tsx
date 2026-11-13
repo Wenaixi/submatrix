@@ -773,9 +773,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
                   <button onClick={() => copyLink(`${baseLink}/mihomo.yaml${tokenQuery}`)} className="btn-primary" title="自动配置好126个策略组与全分流规则，导入直接起飞">
                     <Copy size={13} /> 复制完整订阅 (Clash/Mihomo 通用)
                   </button>
-                  <button onClick={() => copyLink(`${baseLink}/base64.txt${tokenQuery}`)} title="小火箭 / v2rayN 通用标准订阅">
-                    <Copy size={13} /> 复制通用订阅 (Base64)
-                  </button>
+                  {/* 按组架构不生成 base64.txt 产物，该直链恒 404，故移除 */}
                   <button onClick={() => copyLink(`${baseLink}/all.yaml${tokenQuery}`)} className="btn-ghost" title="仅纯节点列表，供第三方配置作 proxy-providers 引用">
                     <Copy size={13} /> 复制纯节点池
                   </button>

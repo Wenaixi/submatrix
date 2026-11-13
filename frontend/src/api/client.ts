@@ -2,26 +2,42 @@
 export function getApiKey(): string {
   // 【安全修复 2026-11-10】移除硬编码默认密钥 "wenxi-admin"：
   // 必须由用户在登录页输入，未配置时返回空（让请求自然 401，不再默认放行）。
-  return localStorage.getItem("submatrix_api_key") || localStorage.getItem("apiKey") || "";
+  // 【修复 2026-11-14】登录页写入的是 scp_api_key（sessionStorage + 记住时 localStorage），
+  // 此处必须一并读取，否则登录成功后 React 应用读不到凭证，会二次弹出密钥框。
+  // sessionStorage 在同一标签页内跳转不丢失，正好承接 /login → /admin 的重定向。
+  return (
+    localStorage.getItem("submatrix_api_key") ||
+    localStorage.getItem("scp_api_key") ||
+    sessionStorage.getItem("scp_api_key") ||
+    localStorage.getItem("apiKey") ||
+    ""
+  );
 }
 
 export function setApiKey(key: string) {
   localStorage.setItem("submatrix_api_key", key);
   localStorage.setItem("apiKey", key);
+  // 同步写回登录页使用的键名，让两套命名归一，避免后续再出现同类不一致。
+  localStorage.setItem("scp_api_key", key);
 }
 
 export async function apiRequest<T = any>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = getApiKey();
   const headers = new Headers(options.headers || {});
-  if (!headers.has("X-API-Key")) {
+  // 【修复 2026-11-14】只有拿到非空凭证时才设置 header。
+  // 若在此处无条件下发空 X-API-Key，服务端 authMiddleware 会认为“header 已提供”，
+  // 从而跳过它自己那条读 cookie 的兜底分支，导致登录页刚种下的 cookie 帮不上 API 的忙。
+  if (token && !headers.has("X-API-Key")) {
     headers.set("X-API-Key", token);
   }
   if (!headers.has("Content-Type") && options.body && typeof options.body === "string") {
     headers.set("Content-Type", "application/json");
   }
 
-  const separator = endpoint.includes("?") ? "&" : "?";
-  const url = `${endpoint}${separator}token=${encodeURIComponent(token)}`;
+  // token 为空时不拼接查询参数，交给服务端走 cookie 兜底分支。
+  const url = token
+    ? `${endpoint}${endpoint.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`
+    : endpoint;
 
   const res = await fetch(url, { ...options, headers });
   if (res.status === 401) {

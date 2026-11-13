@@ -69,7 +69,6 @@
 
             // 验证成功，保存 Session 供后续 API 使用
             sessionStorage.setItem('scp_api_key', key);
-            sessionStorage.setItem('scp_api_key', key);
             if (els.rememberKey.checked) safeLS('scp_api_key', key);
 
             document.cookie = `scp_api_key=${encodeURIComponent(key)}; path=/; max-age=2592000`;
@@ -98,7 +97,7 @@
             els.apiKeyInput.focus()
         } finally {
             els.loginBtn.disabled = false;
-            els.loginBtn.textContent = '进入管理界面';
+            els.loginBtn.textContent = '进入控制台';
         }
     }
 

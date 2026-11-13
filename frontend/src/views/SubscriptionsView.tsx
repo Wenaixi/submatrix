@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
-import { Copy, Eye, X, Smartphone, Monitor } from 'lucide-react';
+import { Copy, Eye, X } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { GroupItem } from '../api/client';
 
 interface SubscriptionsViewProps {
   listenPort: string;
   apiKey: string;
+  groups: GroupItem[];
 }
 
-export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({ listenPort, apiKey }) => {
+export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({ listenPort, apiKey, groups }) => {
   const { showToast } = useToast();
   const [previewContent, setPreviewContent] = useState<{ title: string; text: string } | null>(null);
   // 纯动态自适应当前访问源，无任何硬编码
@@ -25,36 +27,31 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({ listenPort
     return location.origin;
   };
 
-  const subItems = [
-    {
-      name: "Clash / Verge / Mihomo 全能完整订阅",
-      client: "Clash Verge / Mihomo / CFW / FlClash 通用",
-      path: "/mihomo.yaml",
-      desc: "已自动配置好 126 个精细策略组与全量分流规则，客户端直接导入即用（强烈推荐）",
-      highlight: true
-    },
-    {
-      name: "通用 Base64 订阅",
-      client: "小火箭 / v2rayN / Shadowrocket / QuantumultX",
-      path: "/base64.txt",
-      desc: "标准 Base64 格式，适合移动端小火箭、v2rayN 一键订阅，无 404 故障",
-      highlight: false
-    },
-    {
-      name: "纯节点池 (Proxy Provider 专用)",
-      client: "供第三方配置文件外部引用",
-      path: "/all.yaml",
-      desc: "仅包含纯 proxies 节点列表，适合高端玩家放在自己配置的 proxy-providers 节点池中",
-      highlight: false
-    },
-    {
-      name: "历史归档可用池",
-      client: "全客户端可用",
-      path: "/history.yaml",
-      desc: "保留最近多次探测均健康的累计优质节点",
-      highlight: false
-    }
-  ];
+  // 按组生成直链：产物统一落在各分组自己的目录下，旧的全局产物路径已随架构调整为按组独立检测而删除
+  const enabledGroups = groups.filter(g => (g.Enabled ?? g.enabled) !== false);
+
+  const subItems = enabledGroups.flatMap((g) => {
+    const name = g.Name ?? g.name ?? "";
+    if (!name) return [];
+    const base = `/group/${encodeURIComponent(name)}`;
+    const label = g.DisplayName ?? g.displayName ?? g.display_name ?? name;
+    return [
+      {
+        name: `${label} · 完整配置`,
+        client: "Clash Verge / Mihomo / CFW",
+        path: `${base}/mihomo.yaml`,
+        desc: "策略组与分流规则齐全，客户端直接导入即用（推荐）",
+        highlight: true
+      },
+      {
+        name: `${label} · 纯节点池`,
+        client: "Proxy Provider 外部引用",
+        path: `${base}/all.yaml`,
+        desc: "仅含 proxies 节点列表，适合放进自建配置的 proxy-providers 中",
+        highlight: false
+      }
+    ];
+  });
 
   const copy = (url: string) => {
     if (navigator.clipboard) {
@@ -99,7 +96,7 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({ listenPort
             订阅链接
           </h2>
           <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-            已为您自动配置好全量分流策略组与规则，支持直接导入客户端。
+            每个启用的分组各自生成独立订阅直链，按需选择后导入客户端。
           </p>
         </div>
 
@@ -144,6 +141,17 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({ listenPort
         </div>
       </div>
 
+      {subItems.length === 0 ? (
+        <div style={{
+          padding: '24px 20px',
+          background: 'var(--surface-2)',
+          border: '1px solid var(--border)',
+          fontSize: '13px',
+          color: 'var(--text-secondary)'
+        }}>
+          暂时没有可用的分组。请先在「节点分组」页新增并启用分组，保存配置后这里会自动出现对应的订阅直链。
+        </div>
+      ) : (
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(440px, 1fr))', gap: '16px' }}>
         {subItems.map((item, i) => {
           const fullUrl = `${getBaseOrigin()}${item.path}${tokenQuery}`;
@@ -192,6 +200,7 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({ listenPort
           );
         })}
       </div>
+      )}
 
       {previewContent && (
         <div style={{
