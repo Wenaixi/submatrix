@@ -147,3 +147,19 @@
 ### 死代码备忘（未清理，改动时勿当真）
 - `App.tsx` 的 `if (gRes.apiKey) setKey(...)`：后端 `getGroupsHandler` 从不返回该字段。
 - `webui/static/js/admin.js` 整文件无模板引用（`templates/*.html` 只加载 `dist/app.js` 与 `login.js`）。
+
+### .gitignore 的 dist/ 规则曾误伤内嵌产物（2026-11-14 修正）
+- 规则 `dist/` 会匹配**任意层级**的 `dist` 目录，包括 `webui/static/dist/`；
+  原先只靠第 71 行注释声明「刻意不忽略」，注释不是规则，不生效。
+- 已补 `!webui/static/dist/` 否定规则。验证方式：`git check-ignore -v <路径>`，
+  对象为 `webui/static/dist/app.js` 时应无输出，而 `frontend/dist/test.js` 仍被忽略。
+- 已跟踪文件不受忽略规则影响，但合并冲突后文件状态会变复杂，`git add` 可能被挡，
+  需要 `git add -f`。
+
+### 容器重建必查代理变量（2026-11-14 再次踩坑）
+- Docker Desktop 的 `daemon.json` 会把 `proxies` 段注入**每一个新容器**，
+  导致容器内出现 `HTTP_PROXY=http://127.0.0.1:10801`。
+- 容器内的 127.0.0.1 是容器自己，该代理端口不存在，**检测流量全部 connection refused**。
+- 本次实测后果：15186 个节点在 3 分 38 秒内全军覆没，可用节点 0。
+- 重建容器命令必须带齐 `-e HTTP_PROXY= -e HTTPS_PROXY= -e http_proxy= -e https_proxy= -e ALL_PROXY= -e all_proxy=`，
+  之后用 `docker inspect <容器> --format '{{range .Config.Env}}{{println .}}{{end}}' | Select-String PROXY` 复核。

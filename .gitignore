@@ -50,6 +50,9 @@ node_modules/
 **/node_modules/
 .pnpm-store/
 dist/
+# 例外：webui/static/dist 是 go:embed 的运行必需资产，必须纳入版本控制
+# （上面的 dist/ 会匹配任意层级，仅靠注释挡不住，需要显式否定规则）
+!webui/static/dist/
 bin/
 build/
 *.exe
