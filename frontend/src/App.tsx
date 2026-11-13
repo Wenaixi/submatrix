@@ -9,7 +9,6 @@ import {
   setApiKey
 } from './api/client';
 import { GroupsView } from './views/GroupsView';
-import { SubscriptionsView } from './views/SubscriptionsView';
 import { MonitorView } from './views/MonitorView';
 import { FilesView } from './views/FilesView';
 import { AnalysisView } from './views/AnalysisView';
@@ -18,7 +17,6 @@ import { SharesView } from './views/SharesView';
 import { useToast } from './components/Toast';
 import {
   Layers,
-  Link2,
   Activity,
   FolderClosed,
   BarChart2,
@@ -34,18 +32,17 @@ import {
 export const App: React.FC = () => {
   const { showToast } = useToast();
   
-  const parseTab = (): 'groups' | 'subs' | 'monitor' | 'files' | 'analysis' | 'config' => {
+  const parseTab = (): 'groups' | 'monitor' | 'files' | 'analysis' | 'config' => {
     const p = window.location.pathname;
     const h = window.location.hash;
     if (p.includes('/files') || h === '#files') return 'files';
     if (p.includes('/analysis') || h === '#analysis') return 'analysis';
-    if (h === '#subs') return 'subs';
     if (h === '#monitor') return 'monitor';
     if (h === '#config') return 'config';
     return 'groups';
   };
 
-  const [activeTab, setActiveTab] = useState<'groups' | 'subs' | 'monitor' | 'files' | 'analysis' | 'shares' | 'config'>(parseTab);
+  const [activeTab, setActiveTab] = useState<'groups' | 'monitor' | 'files' | 'analysis' | 'shares' | 'config'>(parseTab);
 
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     return (localStorage.getItem('submatrix_theme') as 'light' | 'dark') || 'light';
@@ -76,7 +73,7 @@ export const App: React.FC = () => {
     };
   }, []);
 
-  const switchTab = (tabId: 'groups' | 'subs' | 'monitor' | 'files' | 'analysis' | 'shares' | 'config') => {
+  const switchTab = (tabId: 'groups' | 'monitor' | 'files' | 'analysis' | 'shares' | 'config') => {
     setActiveTab(tabId);
     window.location.hash = tabId === 'groups' ? '' : tabId;
   };
@@ -136,7 +133,6 @@ export const App: React.FC = () => {
   // 人性化纯中文导航项
   const navItems = [
     { id: 'groups', label: '节点分组', icon: Layers },
-    { id: 'subs', label: '订阅链接', icon: Link2 },
     { id: 'monitor', label: '运行日志', icon: Activity },
     { id: 'files', label: '本地文件', icon: FolderClosed },
     { id: 'analysis', label: '节点统计', icon: BarChart2 },
@@ -311,13 +307,6 @@ export const App: React.FC = () => {
               listenPort={listenPort}
               apiKey={apiKey}
               onRefresh={loadData}
-            />
-          )}
-          {activeTab === 'subs' && (
-            <SubscriptionsView
-              listenPort={listenPort}
-              apiKey={apiKey}
-              groups={groups}
             />
           )}
           {activeTab === 'monitor' && <MonitorView />}

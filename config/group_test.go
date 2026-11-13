@@ -131,3 +131,35 @@ func TestFindGroupByTagOrURLNoMatch(t *testing.T) {
 		t.Fatalf("无匹配应回退第一个组 g1, 实际 %s", got.Name)
 	}
 }
+
+// TestResolveGroupEnhancedTagInheritance 校验 enhanced-tag 的组级继承：
+// 未配置时跟随全局；显式 true 可打开；显式 false 必须能覆盖全局的 true。
+func TestResolveGroupEnhancedTagInheritance(t *testing.T) {
+	on, off := true, false
+
+	cases := []struct {
+		name   string
+		global bool
+		group  *bool
+		want   bool
+	}{
+		{"全局开、组未配", true, nil, true},
+		{"全局关、组未配", false, nil, false},
+		{"全局关、组显式开", false, &on, true},
+		{"全局开、组显式关", true, &off, false},
+	}
+	for _, tc := range cases {
+		got := ResolveGroup(GroupConfig{Name: "g", EnhancedTag: tc.group}, Config{EnhancedTag: tc.global})
+		if got.EnhancedTag != tc.want {
+			t.Errorf("%s: EnhancedTag = %v, want %v", tc.name, got.EnhancedTag, tc.want)
+		}
+	}
+
+	// 未配置任何 groups 时，default 组等价于全局配置
+	for _, global := range []bool{true, false} {
+		groups := ResolveAllGroups(Config{EnhancedTag: global})
+		if len(groups) != 1 || groups[0].EnhancedTag != global {
+			t.Errorf("default 组应继承全局 EnhancedTag=%v，实际 %v", global, groups[0].EnhancedTag)
+		}
+	}
+}

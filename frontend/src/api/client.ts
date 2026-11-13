@@ -103,6 +103,9 @@ export interface GroupItem {
   RulePreset?: string;
   SuccessLimit?: number;
   DownloadMB?: number;
+  EnhancedTag?: boolean | null;
+  NodePrefix?: string;
+  ISPCheck?: boolean | null;
   // 健全容错兼容字段
   name?: string;
   displayName?: string;
@@ -138,6 +141,12 @@ export interface GroupItem {
   successLimit?: number;
   download_mb?: number;
   downloadMB?: number;
+  enhanced_tag?: boolean;
+  enhancedTag?: boolean;
+  node_prefix?: string;
+  nodePrefix?: string;
+  isp_check?: boolean;
+  ispCheck?: boolean;
   priority?: number;
   Priority?: number;
 }

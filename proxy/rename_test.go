@@ -2,36 +2,31 @@ package proxies
 
 import (
 	"testing"
-
-	"github.com/Wenaixi/submatrix/config"
 )
 
-// withEnhancedTag 设置 enhanced-tag 开关并在测试结束后还原。
-func withEnhancedTag(t *testing.T, on bool) {
+// enhancedTag 返回测试要用的开关值，并重置序号计数器。
+func enhancedTag(t *testing.T, on bool) bool {
 	t.Helper()
-	old := config.GlobalConfig
-	cfg := config.Config{EnhancedTag: on}
-	config.GlobalConfig = &cfg
-	t.Cleanup(func() { config.GlobalConfig = old })
 	ResetRenameCounter()
+	return on
 }
 
 func TestRenameWithoutEnhancedTag(t *testing.T) {
-	withEnhancedTag(t, false)
+	on := enhancedTag(t, false)
 
-	got := Rename("HK", "HK")
+	got := Rename("HK", "HK", on)
 	if got != "🇭🇰HK_1" {
 		t.Fatalf("Rename(HK, HK) = %q, want %q", got, "🇭🇰HK_1")
 	}
 
 	// 同一地区再次出现时序号递增
-	if got := Rename("HK", "HK"); got != "🇭🇰HK_2" {
+	if got := Rename("HK", "HK", on); got != "🇭🇰HK_2" {
 		t.Fatalf("第二次 Rename = %q, want %q", got, "🇭🇰HK_2")
 	}
 }
 
 func TestRenameWithEnhancedTag(t *testing.T) {
-	withEnhancedTag(t, true)
+	on := enhancedTag(t, true)
 
 	cases := []struct {
 		name      string
@@ -45,7 +40,7 @@ func TestRenameWithEnhancedTag(t *testing.T) {
 	}
 	for _, tc := range cases {
 		ResetRenameCounter()
-		if got := Rename(tc.country, tc.tag); got != tc.want {
+		if got := Rename(tc.country, tc.tag, on); got != tc.want {
 			t.Errorf("%s: Rename(%q, %q) = %q, want %q", tc.name, tc.country, tc.tag, got, tc.want)
 		}
 	}
@@ -53,18 +48,18 @@ func TestRenameWithEnhancedTag(t *testing.T) {
 
 // enhanced-tag 开启但上游没给出带角标的位置标签时，补 ˣ 后缀以示区分。
 func TestRenameWithEnhancedTagFallsBackToX(t *testing.T) {
-	withEnhancedTag(t, true)
+	on := enhancedTag(t, true)
 
-	if got := Rename("HK", ""); got != "🇭🇰HKˣ_1" {
+	if got := Rename("HK", "", on); got != "🇭🇰HKˣ_1" {
 		t.Fatalf("Rename(HK, \"\") = %q, want %q", got, "🇭🇰HKˣ_1")
 	}
 }
 
 // 位置查询失败时不得以空国家拼接出无法识别的名字，应回落为占位旗。
 func TestRenameUnknownCountry(t *testing.T) {
-	withEnhancedTag(t, false)
+	on := enhancedTag(t, false)
 
-	got := Rename("", "")
+	got := Rename("", "", on)
 	if got != "🏴‍☠_1" {
 		t.Fatalf("Rename(\"\", \"\") = %q, want %q", got, "🏴‍☠_1")
 	}
