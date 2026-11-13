@@ -119,3 +119,31 @@
 ### 命名格式
 - 当前 `🇺🇸US_1|30KB/s|免费A`（no enhanced-tag，config 缺 `enhanced-tag: true`）
 - 若要恢复 CF 角标（HK² 等）：config.yaml 加 `enhanced-tag: true` 即可
+
+## 7. 前端产物陷阱与登录凭证断链（2026-11-14 修复）
+
+### 前端产物必须重建才生效（最易踩）
+- `webui/embed.go` 用 `//go:embed static/*` 把 `webui/static/dist/` 打进 Go 二进制，
+  而 `Dockerfile` 只跑 `go build`，**不构建前端**。
+- 后果：只改 `frontend/src/` 而不 `cd frontend && npm run build`，容器里跑的永远是旧产物。
+  本次两个 bug（登录二次输入、订阅页四条全局直链）都源于 11-08 的旧产物与源码脱节。
+- 必做顺序：改源码 → `npm run build`（产物落到 `webui/static/dist/`）→ 重建 Go / Docker 镜像。
+- 本机无 zig、无 gcc，无法 `go build`（CGO 依赖 quickjs）；验证只能走 Docker 构建。
+
+### 登录凭证两套命名（曾导致登录后二次弹窗）
+- 登录页 `login.js` 写 `scp_api_key`（sessionStorage + localStorage + cookie）；
+  React `client.ts` 原只读 `submatrix_api_key` / `apiKey`，两套永不交汇。
+- 修法：`getApiKey()` 读取链补上 `scp_api_key`（localStorage 与 sessionStorage），
+  `setApiKey()` 归一化回写三个键。
+- 附带断链：`apiRequest` 曾无条件下发空 `X-API-Key`，使服务端 `authMiddleware`
+  判定「header 已提供」而跳过 cookie 兜底分支。现改为 token 非空才下发 header 与 `?token=`。
+
+### 已删除的全局产物路由（勿再在 UI 暴露）
+- `/mihomo.yaml`、`/base64.txt`、`/all.yaml`、`/history.yaml` 四条均为旧全局架构遗留，
+  实测全部 404。按组架构只提供 `/group/<组名>/{all,all-raw,mihomo,history}.yaml`。
+- `save` 包内无任何 base64 生成代码，`/group/<组名>/base64.txt` 同样恒 404，
+  `GroupsView` 的「复制通用订阅 (Base64)」按钮已移除。
+
+### 死代码备忘（未清理，改动时勿当真）
+- `App.tsx` 的 `if (gRes.apiKey) setKey(...)`：后端 `getGroupsHandler` 从不返回该字段。
+- `webui/static/js/admin.js` 整文件无模板引用（`templates/*.html` 只加载 `dist/app.js` 与 `login.js`）。
