@@ -91,8 +91,15 @@ func CheckSpeed(httpClient *http.Client, bucket *ratelimit.Bucket, getNetBytes f
 		speedClient.Timeout = 30 * time.Second // 兜底 30s
 	}
 
-	// 下载需要根据配置文件设置较长的超时
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	// 下载需要根据配置文件设置较长的超时。
+	// timeout 必须是已验证的正值：download-timeout 缺省为 0 时（OriginDefaultConfig 未设该字段），
+	// 直接 WithTimeout(_, 0) 会让 ctx 立刻过期，所有节点都判 speed_fail，
+	// 上面 client.Timeout 的 30s 兜底救不回来。
+	ctxTimeout := timeout
+	if ctxTimeout <= 0 {
+		ctxTimeout = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), ctxTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)

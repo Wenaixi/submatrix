@@ -402,9 +402,9 @@ func (pc *ProxyChecker) run(proxies []map[string]any) ([]Result, []map[string]an
 		args = append(args, "total-speed-limit", config.GlobalConfig.TotalSpeedLimit)
 	}
 
-	// 再追加剩余参数
+	// 再追加剩余参数。timeout 优先取组级值，组级未配置时回退全局。
 	args = append(args,
-		"timeout", config.GlobalConfig.Timeout,
+		"timeout", pc.effectiveTimeout()*1000,
 	)
 
 	if speedON {
@@ -699,7 +699,7 @@ func (pc *ProxyChecker) distributeJobs(proxies []map[string]any, ctx context.Con
 					continue
 				}
 
-				cli := CreateClient(mapping)
+				cli := CreateClient(mapping, pc.effectiveTimeout())
 				if cli == nil {
 					// 创建失败：视为 alive 完成（失败），不进入 speed/media
 					pc.pt.CountAlive(false)
@@ -1236,7 +1236,8 @@ func checkOnePlatform(job *ProxyJob, plat string, mediaClient *http.Client, db *
 	case "iprisk":
 		// 如果已有 IP，就直接用，不再调用 GetProxyCountry
 		if job.Result.IP == "" {
-			country, ip, countryCodeTag, ispTag, _ := proxyutils.GetProxyCountry(mediaClient, db, ctx, job.CfLoc, job.CfIP)
+			// iprisk 分支只关心 IP，不需要 ISP 类型标签
+			country, ip, countryCodeTag, ispTag, _ := proxyutils.GetProxyCountry(mediaClient, db, ctx, job.CfLoc, job.CfIP, false)
 			if ip == "" {
 				break
 			}
@@ -1263,8 +1264,10 @@ func checkOnePlatform(job *ProxyJob, plat string, mediaClient *http.Client, db *
 // updateProxyName 更新代理名称
 func (pc *ProxyChecker) updateProxyName(res *Result, httpClient *ProxyClient, speed int, db *maxminddb.Reader, cfLoc string, cfIP string, jctx context.Context) {
 	// 位置信息（国家/地区码/ISP 类型）按需获取：
-	// 重命名需要它，单独的 ISP 类型打标也需要它，两者任一开启就查一次。
-	needLocInfo := pc.grp.RenameNode || pc.grp.ISPCheck
+	// 重命名需要它，ISP 类型打标需要它，流媒体标签也要用它判断「节点地区 vs 解锁地区」
+	// 是否一致（不一致才加地区后缀）。三者任一开启就查一次，否则 res.Country 恒空，
+	// YT/GM/TK 标签会因 `region != ""` 而恒带地区后缀。
+	needLocInfo := pc.grp.RenameNode || pc.grp.ISPCheck || pc.grp.MediaCheck
 	if needLocInfo && res.Country == "" {
 		// 使用 MediaCheckTimeout 替换默认的短超时
 		locTimeout := config.GlobalConfig.MediaCheckTimeout
@@ -1276,7 +1279,7 @@ func (pc *ProxyChecker) updateProxyName(res *Result, httpClient *ProxyClient, sp
 			Timeout:   time.Duration(locTimeout) * time.Second,
 		}
 
-		country, _, countryCodeTag, ispTag, _ := proxyutils.GetProxyCountry(renameClient, db, jctx, cfLoc, cfIP)
+		country, _, countryCodeTag, ispTag, _ := proxyutils.GetProxyCountry(renameClient, db, jctx, cfLoc, cfIP, pc.grp.ISPCheck)
 		res.Country = country
 		res.CountryCodeTag = countryCodeTag
 		res.ISPTag = ispTag
@@ -1436,8 +1439,19 @@ type ProxyClient struct {
 	conns sync.Map // map[*countingConn]struct{}
 }
 
-// CreateClient 创建独立的代理客户端
-func CreateClient(mapping map[string]any) (client *ProxyClient) {
+// effectiveTimeout 返回本组生效的连接超时（毫秒）。
+// 组级 Timeout 优先，未配置（<=0）时回退全局值，保持旧配置的行为不变。
+func (pc *ProxyChecker) effectiveTimeout() int {
+	if pc.grp.Timeout > 0 {
+		return pc.grp.Timeout
+	}
+	return config.GlobalConfig.Timeout
+}
+
+// CreateClient 创建独立的代理客户端。
+// timeoutMS 为该组生效的连接超时（毫秒），由调用方用 effectiveTimeout 计算后传入，
+// 使组级 timeout 真正作用于 dial 与 client 两级。
+func CreateClient(mapping map[string]any, timeoutMS int) (client *ProxyClient) {
 	// 捕获 panic，防止由于底层库解析畸形节点导致整个程序崩溃
 	defer func() {
 		if r := recover(); r != nil {
@@ -1481,7 +1495,7 @@ func CreateClient(mapping map[string]any) (client *ProxyClient) {
 			// 注意：不在此处给连接设永久 deadline——连接会被 http.Transport 复用做后续请求，
 			// 绝对 deadline 会误杀正常复用（测活+测速都走同一 transport）。
 			dialTimeout := 15 * time.Second
-			if cfgTmo := config.GlobalConfig.Timeout; cfgTmo > 0 {
+			if cfgTmo := timeoutMS; cfgTmo > 0 {
 				dialTimeout = time.Duration(cfgTmo) * time.Millisecond
 			}
 			mergedCtx, mergedCancel := context.WithTimeout(reqCtx, dialTimeout)
@@ -1542,7 +1556,7 @@ func CreateClient(mapping map[string]any) (client *ProxyClient) {
 
 	pc.baseTransport = baseTransport
 	pc.Client = &http.Client{
-		Timeout:   time.Duration(config.GlobalConfig.Timeout) * time.Millisecond,
+		Timeout:   time.Duration(timeoutMS) * time.Millisecond,
 		Transport: baseTransport,
 	}
 
@@ -1745,7 +1759,8 @@ func (job *ProxyJob) checkJobLocation(db *maxminddb.Reader, ctx context.Context)
 		Timeout:   time.Duration(locTimeout) * time.Second,
 	}
 
-	country, ip, countryCodeTag, ispTag, err := proxyutils.GetProxyCountry(locClient, db, ctx, job.CfLoc, job.CfIP)
+	// 位置过滤只关心国家/地区，不需要 ISP 类型标签
+	country, ip, countryCodeTag, ispTag, err := proxyutils.GetProxyCountry(locClient, db, ctx, job.CfLoc, job.CfIP, false)
 	if err != nil || country == "" {
 		return false
 	}

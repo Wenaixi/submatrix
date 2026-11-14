@@ -13,7 +13,7 @@ func TestResolveAllGroups_DefaultAndProtocols(t *testing.T) {
 		AppendOriginalName: true,
 	}
 
-	// 1. 测试未定义任何 groups 时，默认组自动继承 filter_protocols = ["http"] 与 rule_preset = "pro_full"
+	// 1. 测试未定义任何 groups 时，默认组自动继承 filter_protocols = ["http"] 与 rule_preset = "acl4ssr"
 	groups := ResolveAllGroups(global)
 	if len(groups) != 1 {
 		t.Fatalf("expected 1 default group, got %d", len(groups))
@@ -22,8 +22,8 @@ func TestResolveAllGroups_DefaultAndProtocols(t *testing.T) {
 	if !reflect.DeepEqual(def.FilterProtocols, []string{"http"}) {
 		t.Errorf("expected default FilterProtocols = [http], got %v", def.FilterProtocols)
 	}
-	if def.RulePreset != RulePresetProFull {
-		t.Errorf("expected default RulePreset = pro_full, got %s", def.RulePreset)
+	if def.RulePreset != RulePresetACL4SSR {
+		t.Errorf("expected default RulePreset = acl4ssr, got %s", def.RulePreset)
 	}
 	if !def.MatchesProtocol("http") || !def.MatchesProtocol("HTTP") {
 		t.Errorf("expected MatchesProtocol(http) to be true")
@@ -66,8 +66,8 @@ func TestResolveAllGroups_DefaultAndProtocols(t *testing.T) {
 	}
 
 	gb := groups[1]
-	if gb.RulePreset != RulePresetProFull {
-		t.Errorf("expected custom-b fallback RulePreset pro_full, got %s", gb.RulePreset)
+	if gb.RulePreset != RulePresetACL4SSR {
+		t.Errorf("expected custom-b fallback RulePreset acl4ssr, got %s", gb.RulePreset)
 	}
 }
 

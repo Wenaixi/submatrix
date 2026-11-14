@@ -228,6 +228,7 @@ func ResolveAllGroups(global Config) []ResolvedGroupConfig {
 		return []ResolvedGroupConfig{
 			{
 				Name:               "default",
+				Enabled:            true, // 必须显式写：布尔零值是 false，app/app.go 会跳过禁用组
 				DisplayName:        "默认组",
 				Tag:                "",
 				CheckAlive:         true,

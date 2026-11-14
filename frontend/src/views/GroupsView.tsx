@@ -8,12 +8,12 @@ import { Copy, Plus, Trash2, Save, ChevronDown, ChevronRight, Sliders } from 'lu
 interface GroupsViewProps {
   groups: GroupItem[];
   setGroups: React.Dispatch<React.SetStateAction<GroupItem[]>>;
-  listenPort: string;
+  // listenPort 已不再使用（订阅直链改用 location.port 判断是否拼端口）
   apiKey: string;
   onRefresh: () => void;
 }
 
-export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, listenPort, apiKey, onRefresh }) => {
+export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, apiKey, onRefresh }) => {
   const { showToast } = useToast();
   const [saving, setSaving] = useState(false);
   // 拖拽排序状态
@@ -195,7 +195,6 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
 
           // 高阶 3 项质检打标开关 (前作核心回归)
           const appendOriginalName = Boolean(g.AppendOriginalName ?? g.append_original_name ?? g.appendOriginalName ?? false);
-          const tagIPType = (g.TagIPType ?? g.tag_ip_type ?? g.tagIPType) !== false;
           const mediaCheck = (g.MediaCheck ?? g.media_check ?? g.mediaCheck) === true;
 
           // 参数与门槛

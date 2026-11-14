@@ -810,8 +810,12 @@ func (pc *ProxyChecker) CleanupMetadata() {
 			cleanProxy := make(map[string]any, len(result.Proxy))
 
 			// 2. 将除了需要清理的元数据之外的字段复制到新 Map
+			//
+			// group_proxy 必须剥离：它是组级前置代理的完整 URL，可能含
+			// http://user:pass@host 形式的账密，而这些 Map 会落盘到
+			// all.yaml / all-raw.yaml / history.yaml 并对外分发。
 			for k, v := range result.Proxy {
-				if k == "sub_url" || k == "sub_tag" || k == "history_score" {
+				if k == "sub_url" || k == "sub_tag" || k == "history_score" || k == "group_proxy" {
 					continue
 				}
 				cleanProxy[k] = v

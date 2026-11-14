@@ -304,7 +304,6 @@ export const App: React.FC = () => {
             <GroupsView
               groups={groups}
               setGroups={setGroups}
-              listenPort={listenPort}
               apiKey={apiKey}
               onRefresh={loadData}
             />

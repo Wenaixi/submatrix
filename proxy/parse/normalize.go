@@ -1,6 +1,7 @@
 package parse
 
 import (
+	"encoding/hex"
 	"fmt"
 	"github.com/goccy/go-json"
 	"log/slog"
@@ -280,6 +281,10 @@ func extractShortID(v any) string {
 	switch val := v.(type) {
 	case string:
 		return val
+	case []byte:
+		// REALITY 的 short-id 是二进制串，必须以十六进制输出。
+		// 若落到 default 分支用 %v，会得到 "[1 2 3]" 这种非法值，节点握手必然失败。
+		return hex.EncodeToString(val)
 	case []string:
 		if len(val) > 0 {
 			return val[0]

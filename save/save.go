@@ -4,6 +4,7 @@ package save
 import (
 	"fmt"
 	"io"
+	"regexp"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -325,6 +326,14 @@ func groupProviderURL(grp config.ResolvedGroupConfig) string {
 	return url
 }
 
+// validGroupName 是组名白名单的最后一道防线。
+//
+// app 层入口（gateway / server / share_handler）已有同样的正则校验，
+// 但 SaveGroup 是 save 包的直接落盘点，subctl、手改 config.yaml、
+// 以及未来的新调用方都能绕过入口校验。组名会被拼进文件路径，
+// 一旦允许 ../ 或绝对路径就是任意目录写入，因此这里必须再校验一次。
+var groupNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
 // SaveGroup 保存单个组的检测结果到 groups/<name>/ 目录。
 //   - all.yaml     纯节点列表（供 proxy-providers 引用）
 //   - mihomo.yaml  按组规则预设融合后的完整配置
@@ -333,6 +342,10 @@ func groupProviderURL(grp config.ResolvedGroupConfig) string {
 // results 为本组本次检测成功节点；historyPool 为本组历史池（含失败但仍有分数的节点）。
 func SaveGroup(grp config.ResolvedGroupConfig, results []check.Result, historyPool []map[string]any) {
 	if grp.Name == "" {
+		return
+	}
+	if !groupNamePattern.MatchString(grp.Name) {
+		slog.Error("组名含非法字符，拒绝落盘（防路径穿越）", "组名", grp.Name)
 		return
 	}
 
@@ -404,6 +417,10 @@ func SaveGroup(grp config.ResolvedGroupConfig, results []check.Result, historyPo
 
 // writeGroupYAML 把一组节点写入 groups/<name>/all.yaml 与 mihomo.yaml（按规则预设融合）。
 func writeGroupYAML(grp config.ResolvedGroupConfig, proxiesList []map[string]any) {
+	if !groupNamePattern.MatchString(grp.Name) {
+		slog.Error("组名含非法字符，拒绝落盘（防路径穿越）", "组名", grp.Name)
+		return
+	}
 	saver, err := method.NewLocalSaver()
 	if err != nil {
 		slog.Error("获取保存目录失败", "err", err)
