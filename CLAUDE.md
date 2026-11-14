@@ -302,3 +302,41 @@
 ### 规则模板热重载天然支持
 `fetchLocalOrAssetTemplate` 每次调用都 `os.ReadFile`，无任何缓存。
 改 `output/` 里任一模板，下次检测自动用新版，无需重启。
+
+## 13. 全量检测配置基线（2026-11-15 实测 448 可用）
+
+### 容器启动参数（缺一不可）
+```powershell
+docker run -d --name submatrix-test --restart always -p 8199:8199 `
+  --dns 223.5.5.5 --dns 119.29.29.29 `
+  --add-host "host.docker.internal:192.168.2.13" `
+  -e HTTP_PROXY= -e HTTPS_PROXY= -e http_proxy= -e https_proxy= `
+  -e ALL_PROXY= -e all_proxy= `
+  -v "D:/newC/CCC/fuwuq/artifacts/submatrix/config:/app/config" `
+  -v "D:/newC/CCC/fuwuq/artifacts/submatrix/output:/app/output" `
+  wenxiloveyou/submatrix:latest
+```
+- `--dns` 公共解析器：容器默认 DNS(192.168.65.7) 不返回 ECH 的 HTTPS 记录
+- `--add-host`：换 `--dns` 后 `host.docker.internal` 失效，必须写死宿主机 WLAN IP
+- `-e *PROXY=`：Docker Desktop 会注入 `127.0.0.1:10801`，容器内那是自己，必然 connection refused
+- Docker Desktop 的 `~/.docker/config.json` 的 `proxies` 段优先级最高，重建容器前先确认已移除
+
+### 五组配置（2026-11-15）
+| 组 | URL 数 | 可用 | 说明 |
+|---|---|---|---|
+| free-a | 19 | 229 | 公网免费源，可用率 1.5% |
+| free-b | 5 | 16 | 公网免费源 |
+| all-in-one | 2 | 181 | 聚合前两组产物 |
+| hneko | 2 | 6 | 付费机场（sub-yes + study 两个域名） |
+| mtf | 1 | 16 | 付费机场，可用率 73% |
+
+### 关键配置项
+- `check-speed: false`（全部组）：省流量，且规避空 `speed-test-url` 的历史坑
+- `fetch-proxy: http://host.docker.internal:10801`（除聚合组）：GitHub raw 与境外订阅源必需
+- `rule-preset: acl4ssr`：29 策略组 / 31 providers / 15 KB，与首尔 Debian 部署一致
+- `timeout: 20000`：免费节点握手慢，5 秒不够
+
+### Debian 订阅迁移结论
+- 首尔 `subs-check` 的 token `d6ac01e7...` **已失效**（403 Forbidden 页面）
+- 但其域名 `study.small1999.sbs` 仍可用，用本机有效 token 访问返回完整订阅
+- 已把该域名加入 hneko 组，两个域名并行拉取
