@@ -163,3 +163,25 @@
 - 本次实测后果：15186 个节点在 3 分 38 秒内全军覆没，可用节点 0。
 - 重建容器命令必须带齐 `-e HTTP_PROXY= -e HTTPS_PROXY= -e http_proxy= -e https_proxy= -e ALL_PROXY= -e all_proxy=`，
   之后用 `docker inspect <容器> --format '{{range .Config.Env}}{{println .}}{{end}}' | Select-String PROXY` 复核。
+
+## 8. 分支模型（2026-11-14 生效）
+
+- **`master`**：稳定可发布分支，CI（`.github/workflows/docker.yml`）只在此分支推送时自动构建镜像。
+- **`dev`**：日常开发分支，功能完成后合入 master。
+- 已删除的 `main` 分支：曾有 77 个提交与 master 的 41 个旧提交分叉，11-04 后 master 停止更新，
+  全部工作都在 main 上。11-14 将 main 内容接管为 master 并强推，旧 master 的提交已丢弃
+  （其中 `check/group_check_test.go` 引用的三个函数在 main 上已不存在，属过时死测试）。
+- 本地 `master` 的 upstream 需手动指向 `origin/master`（重命名后会残留 `origin/main` 的追踪，用
+  `git branch --unset-upstream` 后重新 `-u`）。
+
+## 9. CRLF 配置读取陷阱（2026-11-14 修复）
+
+- 配置文件 `config/config.yaml` 在 Windows 下是 **CRLF 行尾**（`config.yaml.example` 经 go:embed 生成时同样）。
+- 前端 `ConfigView` 的 `readYamlValue` 原用 `(.*)$` 匹配：JS 正则的 `.` 不匹配 `\r`，
+  `$` 无法在行尾成立，**整行匹配失败并返回空串**。
+- 后果不是单项失效，而是**设置页所有输入框都为空、所有开关都显示「已关闭」**，
+  而 config.yaml 里的真实值一直在生效 —— 表现为「WebUI 显示已关闭却仍能访问」。
+- 修复：正则改 `(.*?)\s*\r?$`；`writeYamlValue` 改写行时保留原 `\r`，避免 CRLF 文件局部变 LF。
+- 回归验证：用真实配置内容跑 10 项断言，全部应读到正确值。
+- 相关事实：`enable-web-ui` 默认值本就是 `true`（`config.yaml.example:204`），
+  配置热重载由 `app/config.go` 的 fsnotify 实现，二者无需改动。
