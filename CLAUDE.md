@@ -207,3 +207,26 @@
 ### 容器内访问宿主机代理
 - 必须写 `http://host.docker.internal:10801`，**不能用 `127.0.0.1:10801`**（那是容器自己）。
 - 已验证：容器内经该地址拉取同一订阅成功返回 40114 字节。
+
+### 容器 DNS 必须显式指定，否则 ECH 节点全部失败（2026-11-14）
+- Docker Desktop 默认注入 `192.168.65.7` 作为容器 DNS，该解析器**不返回 HTTPS(type 65) 记录**。
+- 后果：节点带 `ech-opts: { enable: true, query-server-name: cloudflare-ech.com }` 时，
+  Mihomo 报 `resolve ECH config error: no ECH config found in DNS records`，测活全部失败。
+- 实测对比：宿主与公共 DNS（223.5.5.5 / 1.1.1.1 / 8.8.8.8）均返回 1 条 ECH 记录，容器旧 DNS 返回 0 条。
+- 修复：重建容器时加 `--dns 223.5.5.5 --dns 119.29.29.29`。
+- 排查手法：开 `-e LOG_LEVEL=debug` 后，`check/platform/google.go` 的 `slog.Debug(err.Error())`
+  会打印真实失败原因；`checkAlive` 里那条 `slog.Debug("测活出错", "error", err)` 因
+  `CheckAliveWithFallback` 吞掉错误而恒为 `<nil>`，**不要被它误导**。
+
+### 测活失败的其他已知成因（按出现频率）
+- `dns resolve failed: couldn't find ip`：IPv6 节点但配置 `ipv6=false`
+- `failed to dial WebSocket: EOF`：节点自身已失效
+- `REALITY authentication failed`：REALITY 节点凭证或时间不同步
+
+### 配置热重载在容器内不可靠（2026-11-14 实测）
+- `app/config.go` 用 fsnotify 监听 `config.yaml`，本机直接跑二进制时可靠。
+- 但 Docker Desktop + Windows 挂载目录下，宿主机的文件事件**不一定传进 Linux 容器**，
+  改完宿主机文件后容器可能仍用旧配置。
+- 实测：把 `enabled: true` 改成 `false` 后触发检测，容器仍执行了已禁用的组。
+- 结论：改宿主机 `config.yaml` 后需 `docker restart submatrix-test`；
+  通过 WebUI「保存配置」走 `/api/config` 时后端主动写文件并重载，无需重启。
