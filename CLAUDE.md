@@ -185,3 +185,25 @@
 - 回归验证：用真实配置内容跑 10 项断言，全部应读到正确值。
 - 相关事实：`enable-web-ui` 默认值本就是 `true`（`config.yaml.example:204`），
   配置热重载由 `app/config.go` 的 fsnotify 实现，二者无需改动。
+
+## 10. 拉取代理与检测代理分离 + 统一 UA（2026-11-14）
+
+### 两个代理字段语义不同，勿混用
+- `proxy`（yaml `proxy`）：**检测代理**，只作用于该组节点的测活与测速
+  （消费点 `check/check.go` 的 `pc.grp.Proxy` → `mapping["group_proxy"]`）。
+- `fetch-proxy`（yaml `fetch-proxy`）：**拉取代理**，只作用于从订阅源下载节点列表
+  （消费点 `proxy/group_fetch.go` 的 `FetchSubsDataWithProxy(fetchURL, grp.FetchProxy)`）。
+- 未配 `fetch-proxy` 时回退全局 `system-proxy`；配了则**只用它**，
+  不再混入 ghproxy 改写与直连策略（避免「配了代理却仍从直连拉」的误判）。
+
+### 订阅站的 UA 白名单陷阱
+- 实测某订阅站（sub-yes.small1999.sbs）：`clash-verge/v1.6.0` 返回 40 个真实节点，
+  `Clash/v1.18.0` 返回 `proxies: []` 空壳，`Mihomo` 返回无 proxies 段，curl 默认 UA 直接 403。
+- 空壳响应**不会报错**，程序会以为拉取成功但拿到 0 节点——比 403 更隐蔽。
+- 现已将 UA 池统一为 `clash-verge/v1.6.0`（`proxy/fetch.go` 的 `uaList`），
+  GitHub 域名仍走浏览器 UA 分支。
+- `fetchOnce` 的 UA 兜底由 `len(ua) <= 1` 改为空值判断，避免误替换短 UA。
+
+### 容器内访问宿主机代理
+- 必须写 `http://host.docker.internal:10801`，**不能用 `127.0.0.1:10801`**（那是容器自己）。
+- 已验证：容器内经该地址拉取同一订阅成功返回 40114 字节。
