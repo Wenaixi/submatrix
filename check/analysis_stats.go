@@ -73,17 +73,29 @@ func newAnalysisStats() *AnalysisStats {
 
 // GenerateAnalysisReport 生成节点质量分析报告
 func (pc *ProxyChecker) GenerateAnalysisReport() {
-	// 统计可用节点数量
+	// 统计可用节点数量。
+	//
+	// 同一订阅链接可能被多个组引用（如 free-a 与 free-b 共用 5 个源），
+	// 若逐条 ++ 累加，Success 会按组重复计数，与「取最大值」口径的 Total 不一致，
+	// 导致存活率虚高。这里先汇总本组对该 URL 的可用数，再与已有值取较大者。
+	localSuccess := make(map[string]int)
 	for _, result := range pc.results {
 		if result.Proxy != nil {
 			if subURL, ok := result.Proxy["sub_url"].(string); ok {
-				proxyutils.SubStatsMutex.Lock() // 加锁
-				stats := proxyutils.SubStats[subURL]
-				stats.Success++
-				proxyutils.SubStats[subURL] = stats
-				proxyutils.SubStatsMutex.Unlock() // 解锁
+				localSuccess[subURL]++
 			}
 		}
+	}
+	if len(localSuccess) > 0 {
+		proxyutils.SubStatsMutex.Lock()
+		for subURL, n := range localSuccess {
+			stats := proxyutils.SubStats[subURL]
+			if n > stats.Success {
+				stats.Success = n
+			}
+			proxyutils.SubStats[subURL] = stats
+		}
+		proxyutils.SubStatsMutex.Unlock()
 	}
 
 	globalAnalysis := newAnalysisStats()

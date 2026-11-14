@@ -110,11 +110,19 @@ func FetchGroupProxies(grp config.ResolvedGroupConfig) ([]map[string]any, int, e
 		// 统计订阅源：Total 供质检报告算存活率，Size 供报告展示体积。
 		// 按组拉取不经过 GetProxies，这里不写的话报告里会出现 Success>Total 的错乱
 		// （Success 由 GenerateAnalysisReport 另路累加，Total 缺失就只剩除零保护后的 1）。
+		//
+		// 用「取较大值」而不是累加：同一订阅链接可能被多个组引用（如 free-a 与 free-b
+		// 共用 5 个源），累加会让 Total 与 Success 都按组重复计数。取最大值保证
+		// Total 始终代表「该订阅源自身有多少节点」，与 Success 的口径一致。
 		statKey := stripQuery(fetchURL)
 		SubStatsMutex.Lock()
 		st := SubStats[statKey]
-		st.Total += valid
-		st.Size = len(data)
+		if valid > st.Total {
+			st.Total = valid
+		}
+		if len(data) > st.Size {
+			st.Size = len(data)
+		}
 		st.ErrMsg = ""
 		SubStats[statKey] = st
 		SubStatsMutex.Unlock()

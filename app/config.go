@@ -137,6 +137,14 @@ func (app *App) createDefaultConfig() error {
 //
 // 两者都调用 tryReloadByModTime()，用同一把锁与同一个 mtime 基准去重，不会重复重载。
 func (app *App) initConfigWatcher() error {
+	// 0. 记录启动时的 mtime 作为去重基准。
+	// 不初始化的话 lastConfigMod 是零值，第一次轮询 tick 必然判定「mtime 前进了」，
+	// 会在启动 3 秒后多触发一次 onConfigChange（重启 Sub-Store、重建 cron），
+	// 造成服务被重复启动。
+	if info, err := os.Stat(app.configPath); err == nil {
+		app.lastConfigMod = info.ModTime()
+	}
+
 	// 1. 轮询无条件启动
 	ctx, cancel := context.WithCancel(context.Background())
 	app.watcherCancel = cancel

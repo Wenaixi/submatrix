@@ -231,7 +231,9 @@ func ResolveAllGroups(global Config) []ResolvedGroupConfig {
 				DisplayName:        "默认组",
 				Tag:                "",
 				CheckAlive:         true,
-				CheckSpeed:         true,
+				// 与 ResolveGroup 保持一致：测速地址为空时不得开启测速，
+				// 否则测速环节会构造空 URL 请求并必然失败，把可用节点全判成 speed_fail。
+				CheckSpeed:         strings.TrimSpace(global.SpeedTestURL) != "",
 				MinSpeed:           global.MinSpeed,
 				Timeout:            resolveTimeout(global.Timeout),
 				DropOnFail:         true,
