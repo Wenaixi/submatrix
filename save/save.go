@@ -15,6 +15,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 
+	"github.com/Wenaixi/submatrix/assets"
 	"github.com/Wenaixi/submatrix/check"
 	"github.com/Wenaixi/submatrix/config"
 	"github.com/Wenaixi/submatrix/save/method"
@@ -264,11 +265,31 @@ func fetchLocalOrAssetTemplate(filename string) ([]byte, error) {
 			return data, nil
 		}
 	}
+	// 其次读工作目录下的 assets/（本机直接跑二进制时存在）
 	assetCandidate := filepath.Join("assets", filename)
 	if data, err := os.ReadFile(assetCandidate); err == nil && len(data) > 0 {
 		return data, nil
 	}
+	// 再次用 go:embed 的二进制内嵌副本：容器镜像里没有 assets/ 目录，
+	// 这条路径是容器环境下唯一能拿到内置模板的来源。
+	if embedded, ok := embeddedTemplate(filename); ok {
+		return embedded, nil
+	}
 	return fetchMihomoTemplate()
+}
+
+// embeddedTemplate 按文件名返回 go:embed 打进二进制的内置模板。
+// 容器镜像不含 assets/ 目录，这是容器内唯一的本地兜底来源。
+func embeddedTemplate(filename string) ([]byte, bool) {
+	switch filename {
+	case "ACL4SSR_Online_Full.yaml":
+		return assets.EmbeddedOverrideYamlACL4SSR, true
+	case "Mihomo-Rules-CDN.yaml":
+		return assets.EmbeddedOverrideYamlSinspiredRulesCDN, true
+	case "Mihomo-Rules-Lite-CDN.yaml":
+		return assets.EmbeddedOverrideYamlSinspiredRulesLiteCDN, true
+	}
+	return nil, false
 }
 
 // buildGroupMihomoYAML 将单组节点合并进组专属或内置的 Mihomo 规则模板中
@@ -408,10 +429,17 @@ func writeGroupYAML(grp config.ResolvedGroupConfig, proxiesList []map[string]any
 	}
 
 	mihomoData, err := buildGroupMihomoYAML(grp, proxiesList)
-	if err == nil && len(mihomoData) > 0 {
+	switch {
+	case err == nil && len(mihomoData) > 0:
 		_ = os.WriteFile(filepath.Join(groupDir, "mihomo.yaml"), mihomoData, 0644)
-	} else if err == nil {
-		slog.Warn("合并组规则模板失败，降级保存纯节点", "group", grp.Name, "err", err)
+	case err != nil:
+		// 模板加载/解析失败：必须记录并降级，否则客户端拿不到 mihomo.yaml 而日志毫无线索
+		slog.Warn("合并组规则模板失败，降级保存纯节点列表",
+			"group", grp.Name, "preset", grp.RulePreset, "err", err)
+		_ = os.WriteFile(filepath.Join(groupDir, "mihomo.yaml"), allYamlData, 0644)
+	default:
+		// err == nil 且模板为空：仅纯节点模式（direct_pure 已提前 return），视为异常但可降级
+		slog.Warn("规则模板为空，降级保存纯节点列表", "group", grp.Name, "preset", grp.RulePreset)
 		_ = os.WriteFile(filepath.Join(groupDir, "mihomo.yaml"), allYamlData, 0644)
 	}
 }

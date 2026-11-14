@@ -129,21 +129,27 @@ func (app *App) createDefaultConfig() error {
 }
 
 // initConfigWatcher 初始化配置文件监听。
-// 优先使用 inotify（Linux 内核事件通知），若内核 inotify 实例数已达上限
-// （群晖 NAS 等设备默认值较低，通常为 8~128），则自动降级为轮询模式。
+//
+// 两条路径同时工作，互为兜底：
+//   - inotify：本机文件系统事件，100ms 防抖后触发，响应最快。
+//   - 轮询：每 3s stat 一次 mtime。容器内 bind mount 的文件事件不会传进容器内核，
+//     inotify 初始化成功也收不到事件，只靠 inotify 会静默失效，因此轮询必须无条件启动。
+//
+// 两者都调用 tryReloadByModTime()，用同一把锁与同一个 mtime 基准去重，不会重复重载。
 func (app *App) initConfigWatcher() error {
+	// 1. 轮询无条件启动
+	ctx, cancel := context.WithCancel(context.Background())
+	app.watcherCancel = cancel
+	go app.pollConfigFile(ctx)
+
+	// 2. 尝试 inotify，失败只记日志，轮询仍在工作
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		// inotify_init1 失败，原因通常是 /proc/sys/fs/inotify/max_user_instances 耗尽。
-		// 降级为 5 秒轮询，功能等价，不影响正常运行。
-		slog.Warn("inotify 初始化失败，降级为文件轮询监听模式",
+		slog.Warn("inotify 初始化失败，仅使用轮询监听",
 			"error", err,
-			"轮询间隔", "5s",
+			"轮询间隔", "3s",
 			"提示", "可通过 sysctl fs.inotify.max_user_instances=1024 提高内核限制",
 		)
-		ctx, cancel := context.WithCancel(context.Background())
-		app.watcherCancel = cancel
-		go app.pollConfigFile(ctx)
 		return nil
 	}
 
@@ -170,8 +176,7 @@ func (app *App) initConfigWatcher() error {
 
 					// 创建新的定时器，延迟100ms执行
 					debounceTimer = time.AfterFunc(100*time.Millisecond, func() {
-						slog.Info("配置文件发生变化，正在重新加载")
-						app.onConfigChange()
+						app.tryReloadByModTime()
 					})
 				}
 			case err, ok := <-watcher.Errors:
@@ -185,49 +190,56 @@ func (app *App) initConfigWatcher() error {
 
 	// 监听配置文件所在目录（兼容容器外修改）
 	if err := watcher.Add(filepath.Dir(app.configPath)); err != nil {
-		slog.Warn("添加 inotify 监听失败，降级为文件轮询监听模式",
-			"error", err, "轮询间隔", "5s")
+		slog.Warn("添加 inotify 监听失败，仅使用轮询监听", "error", err, "轮询间隔", "3s")
 		_ = watcher.Close()
 		app.watcher = nil
-		ctx, cancel := context.WithCancel(context.Background())
-		app.watcherCancel = cancel
-		go app.pollConfigFile(ctx)
 		return nil
 	}
 
-	slog.Info("配置文件监听启动")
+	slog.Info("配置文件监听已启动", "机制", "inotify + 轮询(3s)")
 	return nil
 }
 
-// pollConfigFile 通过定期 stat 检测配置文件修改时间，作为 inotify 不可用时的降级方案。
+// pollConfigFile 定期 stat 配置文件，与 inotify 互为兜底。
+// 容器内 bind mount 的文件事件到不了容器内核，这条路径才是容器里真正生效的那条。
 // 通过传入的 ctx 控制生命周期，Shutdown() 时调用 app.watcherCancel() 即可退出。
 func (app *App) pollConfigFile(ctx context.Context) {
-	var lastMod time.Time
-	if info, err := os.Stat(app.configPath); err == nil {
-		lastMod = info.ModTime()
-	}
-
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 
-	slog.Info("配置文件轮询监听已启动", "path", app.configPath)
+	slog.Info("配置文件轮询监听已启动", "path", app.configPath, "间隔", "3s")
 	for {
 		select {
 		case <-ticker.C:
-			info, err := os.Stat(app.configPath)
-			if err != nil {
-				continue
-			}
-			if info.ModTime().After(lastMod) {
-				lastMod = info.ModTime()
-				slog.Info("配置文件发生变化（轮询检测），正在重新加载")
-				app.onConfigChange()
-			}
+			app.tryReloadByModTime()
 		case <-ctx.Done():
 			slog.Info("配置文件轮询监听已停止")
 			return
 		}
 	}
+}
+
+// tryReloadByModTime 是配置重载的唯一决策点。
+//
+// inotify 事件与轮询 tick 都经由这里，用 configModMu 串行化、用 lastConfigMod 去重：
+// 只有 mtime 相对上一次重载确实前进时才真正执行 onConfigChange，
+// 因此两个机制同时在线也不会重复重载。
+func (app *App) tryReloadByModTime() {
+	app.configModMu.Lock()
+	defer app.configModMu.Unlock()
+
+	info, err := os.Stat(app.configPath)
+	if err != nil {
+		// 文件暂时不可读（编辑器替换中 / 被删除），跳过本轮，下次 tick 再试
+		return
+	}
+	if !info.ModTime().After(app.lastConfigMod) {
+		return
+	}
+	app.lastConfigMod = info.ModTime()
+
+	slog.Info("配置文件发生变化，正在重新加载", "mtime", info.ModTime().Format("15:04:05"))
+	app.onConfigChange()
 }
 
 // onConfigChange 配置文件变化时的统一响应逻辑，由 inotify 事件或轮询共同调用。

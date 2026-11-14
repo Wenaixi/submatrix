@@ -35,9 +35,14 @@ type App struct {
 	configPath string
 	interval   int
 	watcher    *fsnotify.Watcher
-	// watcherCancel 用于停止轮询配置监听 goroutine（inotify 不可用时的降级方案）。
-	// 若 inotify 正常工作则此字段为 nil。
+	// watcherCancel 用于停止轮询配置监听 goroutine。
+	// 轮询无条件启动（容器内 inotify 可能收不到 bind mount 的事件），
+	// 因此该字段始终非 nil。
 	watcherCancel context.CancelFunc
+	// lastConfigMod + configModMu 是配置重载的唯一去重依据：
+	// inotify 事件与轮询 tick 共用它，只有 mtime 真正前进才触发 onConfigChange。
+	lastConfigMod time.Time
+	configModMu   sync.Mutex
 	checkChan     chan struct{} // 触发检测的通道
 	checking      atomic.Bool   // 检测状态标志
 	ticker        *time.Ticker
