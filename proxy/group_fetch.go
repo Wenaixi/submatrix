@@ -62,6 +62,13 @@ func FetchGroupProxies(grp config.ResolvedGroupConfig) ([]map[string]any, int, e
 		if err != nil {
 			slog.Warn("组订阅拉取失败，跳过", "组", grp.Name, "url", fetchURL, "err", err)
 			lastErr = err
+			// 拉取失败也要在统计里留痕，否则报告里该订阅源会整条消失
+			statKey := stripQuery(fetchURL)
+			SubStatsMutex.Lock()
+			st := SubStats[statKey]
+			st.ErrMsg = err.Error()
+			SubStats[statKey] = st
+			SubStatsMutex.Unlock()
 			continue
 		}
 
@@ -100,6 +107,18 @@ func FetchGroupProxies(grp config.ResolvedGroupConfig) ([]map[string]any, int, e
 			all = append(all, node)
 			valid++
 		}
+		// 统计订阅源：Total 供质检报告算存活率，Size 供报告展示体积。
+		// 按组拉取不经过 GetProxies，这里不写的话报告里会出现 Success>Total 的错乱
+		// （Success 由 GenerateAnalysisReport 另路累加，Total 缺失就只剩除零保护后的 1）。
+		statKey := stripQuery(fetchURL)
+		SubStatsMutex.Lock()
+		st := SubStats[statKey]
+		st.Total += valid
+		st.Size = len(data)
+		st.ErrMsg = ""
+		SubStats[statKey] = st
+		SubStatsMutex.Unlock()
+
 		slog.Info("组订阅已拉取", "组", grp.Name, "url", fetchURL, "节点数", valid)
 	}
 

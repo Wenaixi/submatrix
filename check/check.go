@@ -1262,24 +1262,28 @@ func checkOnePlatform(job *ProxyJob, plat string, mediaClient *http.Client, db *
 
 // updateProxyName 更新代理名称
 func (pc *ProxyChecker) updateProxyName(res *Result, httpClient *ProxyClient, speed int, db *maxminddb.Reader, cfLoc string, cfIP string, jctx context.Context) {
+	// 位置信息（国家/地区码/ISP 类型）按需获取：
+	// 重命名需要它，单独的 ISP 类型打标也需要它，两者任一开启就查一次。
+	needLocInfo := pc.grp.RenameNode || pc.grp.ISPCheck
+	if needLocInfo && res.Country == "" {
+		// 使用 MediaCheckTimeout 替换默认的短超时
+		locTimeout := config.GlobalConfig.MediaCheckTimeout
+		if locTimeout <= 0 {
+			locTimeout = 10
+		}
+		renameClient := &http.Client{
+			Transport: httpClient.Transport,
+			Timeout:   time.Duration(locTimeout) * time.Second,
+		}
+
+		country, _, countryCodeTag, ispTag, _ := proxyutils.GetProxyCountry(renameClient, db, jctx, cfLoc, cfIP)
+		res.Country = country
+		res.CountryCodeTag = countryCodeTag
+		res.ISPTag = ispTag
+	}
+
 	// 以节点IP查询位置重命名（如果开启）
 	if pc.grp.RenameNode {
-		if res.Country == "" {
-			// 使用 MediaCheckTimeout 替换默认的短超时
-			locTimeout := config.GlobalConfig.MediaCheckTimeout
-			if locTimeout <= 0 {
-				locTimeout = 10
-			}
-			renameClient := &http.Client{
-				Transport: httpClient.Transport,
-				Timeout:   time.Duration(locTimeout) * time.Second,
-			}
-
-			country, _, countryCodeTag, ispTag, _ := proxyutils.GetProxyCountry(renameClient, db, jctx, cfLoc, cfIP)
-			res.Country = country
-			res.CountryCodeTag = countryCodeTag
-			res.ISPTag = ispTag
-		}
 		if res.Country != "" {
 			res.Proxy["name"] = pc.grp.NodePrefix + proxyutils.Rename(res.Country, res.CountryCodeTag, pc.grp.EnhancedTag)
 		} else {

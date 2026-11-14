@@ -132,7 +132,10 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
     }
   };
 
-  const portStr = listenPort ? (listenPort.startsWith(":") ? listenPort : ":" + listenPort) : (location.port ? ":" + location.port : "");
+  // 端口只在「当前访问端口非标准」时拼接：
+  // 从公网域名（443/80）打开时 location.port 为空，直链不该带 :8199；
+  // 从本机 127.0.0.1:8199 打开时才需要端口。
+  const portStr = location.port ? ":" + location.port : "";
   const protocol = location.protocol;
   const host = location.hostname;
   const tokenQuery = apiKey ? `?token=${encodeURIComponent(apiKey)}` : "";
@@ -362,15 +365,15 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
                   }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                       <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }} title="标记 |家宽、|机房 或 |移动">
-                        IP画像打标
+                        ISP 类型打标
                         <InfoTooltip
-                          title="IP画像打标 (Tag IP Type)"
+                          title="ISP 类型打标 (ISP Check)"
                           desc="检测并标记节点的出口网络类型（如 |家宽、|机房 或 |移动）。"
-                          principle="通过多渠道 ISP 数据库轮询识别节点出口 IP 的归属组织与网络属性。"
-                          recommend="对流媒体或游戏防封有特定需求（如需要住宅 IP）时建议开启。"
+                          principle="开启后会查询节点出口 IP 的归属组织与网络属性；与「智能改名」各自独立生效。"
+                          recommend="对流媒体或游戏防封有特定需求（如需要住宅 IP）时开启。"
                         />
                       </span>
-                      <Switch checked={tagIPType} onChange={(c) => updateGroup(idx, { TagIPType: c, tag_ip_type: c })} />
+                      <Switch checked={ispCheck} onChange={(c) => updateGroup(idx, { ISPCheck: c, isp_check: c })} />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                       <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }} title="检测 Netflix/GPT/Gemini/YouTube 解锁">
@@ -494,7 +497,8 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
               </div>
 
               {/* 组级命名与打标扩展：增强角标 / 节点名前缀 / ISP 类型检测 */}
-              <div style={{ display: 'grid', gridTemplateColumns: checkAlive ? '1fr 1fr 1fr' : '1fr 1fr', gap: '10px', padding: '10px 12px', background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', padding: '10px 12px', background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+                {renameNode && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                   <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }} title="显示 CF 状态角标：HK²=直连、HK¹⁺=CF同区、HK¹-US⁰=CF跨区">
                     增强位置角标
@@ -507,6 +511,8 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
                   </span>
                   <Switch checked={enhancedTag} onChange={(c) => updateGroup(idx, { EnhancedTag: c, enhanced_tag: c })} />
                 </div>
+                )}
+                {renameNode && (
                 <div>
                   <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', marginBottom: '3px' }}>
                     节点名前缀
@@ -524,19 +530,6 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
                     onChange={(e) => updateGroup(idx, { NodePrefix: e.target.value, node_prefix: e.target.value })}
                   />
                 </div>
-                {checkAlive && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }} title="识别机房/住宅/移动等出口类型（需全局配置 API key）">
-                      ISP 类型检测
-                      <InfoTooltip
-                        title="ISP 类型检测 (ISP Check)"
-                        desc="识别节点出口属于机房、住宅还是移动网络，用于甄选家宽 IP。"
-                        principle="调用配置好的 ISP 情报 API 查询出口 IP 的归属组织与网络属性，并写入打标结果。"
-                        recommend="有流媒体或游戏防封需求时开启；需先在全局配置里填入 ISP 检测 API key。"
-                      />
-                    </span>
-                    <Switch checked={ispCheck} onChange={(c) => updateGroup(idx, { ISPCheck: c, isp_check: c })} />
-                  </div>
                 )}
               </div>
 
