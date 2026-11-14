@@ -264,3 +264,41 @@
 - hneko 组（`check-speed: true` + 空 `speed-test-url`）：修复前 0 可用 → 修复后 **6 可用**
   （2 vless + 4 hysteria2），日志 `enable-speedtest=false` 证明配置降级生效。
 - mtf 组（`check-speed: false`）：15 可用。
+
+## 12. 热重载：双保险 + 模板嵌入兜底（2026-11-14）
+
+### 症状与根因
+- 症状：容器内改 `config.yaml` 后完全无反应，等 2 分钟零日志。
+- 根因：`initConfigWatcher` 把「inotify 初始化成功」当成「inotify 会收到事件」。
+  Docker Desktop 的 bind mount 不把宿主机文件事件传进容器内核，事件永不到达；
+  而轮询兜底只在 inotify **初始化失败**时才启动，于是两条路径同时哑火。
+
+### 修复（commit f9e8664）
+- **轮询无条件启动**：先起 `pollConfigFile` goroutine，再尝试 inotify，后者失败只记日志。
+- **统一去重**：新增 `tryReloadByModTime()`，inotify 事件与轮询 tick 共用
+  `configModMu` + `lastConfigMod`，只有 mtime 真正前进才触发 `onConfigChange`。
+- 轮询间隔 5s → **3s**（容器内这是唯一响应路径）。
+- `App` 结构体新增 `lastConfigMod time.Time` / `configModMu sync.Mutex`。
+
+### 模板加载的三层兜底（save/save.go）
+查找顺序：`output/<名>` → `assets/<名>` → **`go:embed` 内嵌副本** → HTTP 自拉。
+- 容器镜像**不含 `assets/` 目录**，此前嵌入的 `EmbeddedOverrideYamlACL4SSR` 等变量
+  从未被使用，读到失败就回退 HTTP 自拉（容器内回环，大概率失败）。
+- 新增 `embeddedTemplate(filename)` 按文件名返回内嵌模板。
+
+### 模板合并失败不再静默（save/save.go）
+- 原实现 `err != nil` 时什么都不做：不写 `mihomo.yaml`、不打日志、不降级，
+  用户只能看到文件消失而无任何线索。
+- 改为 `err != nil` 与模板为空两种情况都 `slog.Warn` + 降级保存纯节点列表。
+
+### 验证结果（hotreload2 镜像，全新空 output 目录）
+| 验证项 | 结果 |
+|---|---|
+| 容器内配置热重载 | 1 秒内触发 |
+| 连续两次改动（间隔 0.3s） | 只触发 1 次（去重生效） |
+| 空目录下模板加载 | `mihomo.yaml` 正常生成 15266 字节 / 31 providers |
+| 改 output/ 模板策略组名 | 产物中 17 处同步更新 |
+
+### 规则模板热重载天然支持
+`fetchLocalOrAssetTemplate` 每次调用都 `os.ReadFile`，无任何缓存。
+改 `output/` 里任一模板，下次检测自动用新版，无需重启。
