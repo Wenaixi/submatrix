@@ -30,9 +30,10 @@ func CheckAliveWithFallback(httpClient *http.Client, ctx context.Context) (bool,
 	return false, nil
 }
 
-// checkGoogleEndpoint 使用 HEAD 方法检查 URL 的状态码。
+// checkGoogleEndpoint 使用 GET 方法检查 URL 的状态码，2xx 即视为成功。
+// statusCode 参数保留仅为兼容既有调用方签名，实际判定不依赖具体状态码。
 func checkGoogleEndpoint(httpClient *http.Client, ctx context.Context, url string, statusCode int) (bool, error) {
-	req, err := http.NewRequestWithContext(ctx, "HEAD", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return false, err
 	}
@@ -41,9 +42,6 @@ func checkGoogleEndpoint(httpClient *http.Client, ctx context.Context, url strin
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
 
-	// 释放连接池和内存
-	req.Close = true
-
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		slog.Debug(err.Error())
@@ -51,5 +49,6 @@ func checkGoogleEndpoint(httpClient *http.Client, ctx context.Context, url strin
 	}
 	defer resp.Body.Close()
 
-	return resp.StatusCode == statusCode, nil
+	_ = statusCode
+	return resp.StatusCode >= 200 && resp.StatusCode < 300, nil
 }
