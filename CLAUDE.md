@@ -230,3 +230,37 @@
 - 实测：把 `enabled: true` 改成 `false` 后触发检测，容器仍执行了已禁用的组。
 - 结论：改宿主机 `config.yaml` 后需 `docker restart submatrix-test`；
   通过 WebUI「保存配置」走 `/api/config` 时后端主动写文件并重载，无需重启。
+
+## 11. 测速地址为空导致节点全灭（2026-11-14 修复）
+
+### 症状与定位
+- 症状：`check-speed: true` 的组可用节点恒为 0，`check-speed: false` 的组却有一批可用。
+- 对照实验（同一组、同一批节点、同一镜像，只改一个开关）：
+  `check-speed: false` → 15 可用；`true` → 0 可用。
+- 日志关键行：`随机选择的测速URL  url=""` —— 测速 URL 是空字符串。
+
+### 根因
+- `config.yaml.example` 明确写着「speed-test-url 留空关闭测速」，
+  但 `CheckSpeed` 没有实现该语义：空值时仍 `http.NewRequestWithContext(ctx, "GET", "", nil)`，
+  `""` 不报错，请求发出后必然失败 → 节点判 `speed_fail` → 丢弃。注释与实现不符。
+- 叠加因素：`fastSpeedTestURLs`（由测试聚合生成）可能为空数组，
+  导致 `init()` 里 `testURLs` 保持 nil，`random` 语义也失效。
+
+### 三层修复（`fix/alive-check`，commit dae862b）
+1. `CheckSpeed` 入口：URL 为空直接返回 `(0,0,nil)`，不再发空请求。
+2. `speed.go` 的 `init()`：`fastSpeedTestURLs` 为空时回退到静态 `SpeedTestURLs`（69 条）。
+3. `ResolveGroup`：`SpeedTestURL` 为空时**强制** `CheckSpeed = false`，
+   放在所有组级覆盖之后 —— 即使前端把开关点开也会被兜住，`min-speed>0` 时同样安全。
+
+### 附带修复：测试会污染生产代码
+- `TestAggregateSpeedResults` 直接写 `check/platform/speed_var.go`。
+  网络受限时聚合结果为空，会把 24 条精选 URL 覆盖成空数组（该文件头写着 DO NOT EDIT，
+  但测试自己在 EDIT 它）。
+- 已加三道保护：`GENERATE_SPEED_URLS=1` 环境变量门控、聚合结果不足现有列表一半时拒绝覆盖、
+  写临时文件后原子 rename（避免中断留下半截文件导致包编译失败）。
+- 验证方式：`md5sum check/platform/speed_var.go` 跑测试前后应一致。
+
+### 端到端验证结果
+- hneko 组（`check-speed: true` + 空 `speed-test-url`）：修复前 0 可用 → 修复后 **6 可用**
+  （2 vless + 4 hysteria2），日志 `enable-speedtest=false` 证明配置降级生效。
+- mtf 组（`check-speed: false`）：15 可用。
