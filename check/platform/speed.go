@@ -19,8 +19,12 @@ import (
 var testURLs []string
 
 func init() {
+	// fastSpeedTestURLs 由测试聚合脚本生成，可能为空（脚本未产出数据时会写成空数组）。
+	// 此时回退到静态的 SpeedTestURLs，保证 "random" 语义在任何情况下都有可用 URL。
 	if len(fastSpeedTestURLs) > 0 {
 		testURLs = fastSpeedTestURLs
+	} else {
+		testURLs = SpeedTestURLs
 	}
 }
 
@@ -61,13 +65,21 @@ func (r *networkLimitedReader) Read(p []byte) (int, error) {
 
 // CheckSpeed 执行下载测速
 // speedURL/downloadTimeoutSec/downloadMB 来自组配置（组级字段参数化）
+//
+// 返回 (speed, traffic, err)。speedURL 为空时按配置语义「关闭测速」处理：
+// 返回 (0, 0, nil)，由调用方结合 min-speed 判定——min-speed 为 0 时视为通过，
+// 不再发出注定失败的请求（旧实现在此会构造空 URL 并必然失败，导致节点被误判死亡）。
 func CheckSpeed(httpClient *http.Client, bucket *ratelimit.Bucket, getNetBytes func() uint64, speedURL string, downloadTimeoutSec, downloadMB int) (int, int64, error) {
 	// 确定测速 URL，根据配置使用随机下载测速链接
-	url := speedURL
+	url := strings.TrimSpace(speedURL)
 	if strings.Contains(url, "random") && len(testURLs) > 0 {
 		url = testURLs[rand.IntN(len(testURLs))]
 	}
-	slog.Debug("随机选择的测速URL", "url", url)
+	if url == "" {
+		slog.Debug("测速 URL 为空，跳过测速", "downloadMB", downloadMB)
+		return 0, 0, nil
+	}
+	slog.Debug("使用的测速URL", "url", url)
 
 	speedClient := *httpClient
 	// 【修复 2026-11-12】不再把 Timeout 清零：保留 client 级 Timeout 作为最终兜底，

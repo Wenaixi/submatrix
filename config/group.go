@@ -210,6 +210,14 @@ func ResolveGroup(g GroupConfig, global Config) ResolvedGroupConfig {
 	if g.DownloadMB != nil && *g.DownloadMB > 0 {
 		res.DownloadMB = *g.DownloadMB
 	}
+
+	// 测速地址为空时必须关闭测速，否则测速环节会构造空 URL 请求并必然失败。
+	// 放在所有组级覆盖之后，确保无论哪一层把 check-speed 打开，都会被这条约束兜住：
+	// 没有可用的测速目标，测速就无从谈起，开着只会把本来可用的节点判成 speed_fail。
+	if strings.TrimSpace(res.SpeedTestURL) == "" {
+		res.CheckSpeed = false
+	}
+
 	return res
 }
 
