@@ -720,25 +720,47 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, liste
                     </div>
                   </div>
 
-                  {/* 组专用前置代理 */}
-                  <div>
-                    <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', marginBottom: '3px' }}>
-                      组专用前置代理 (选填)
-                      <InfoTooltip
-                        title="组专用前置代理 (Group Proxy)"
-                        desc="为该组指定专用的前置代理服务器（HTTP/SOCKS5）。"
-                        principle="该组的所有订阅拉取、连通测活与测速流量均先经过该代理打向目标节点。"
-                        recommend="需要在特定网络出口测活时填写，如 http://127.0.0.1:10808。"
+                  {/* 代理配置：检测代理与拉取代理相互独立 */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div>
+                      <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', marginBottom: '3px' }}>
+                        检测代理 (选填)
+                        <InfoTooltip
+                          title="检测代理 (Check Proxy)"
+                          desc="测活与测速流量使用的代理，只影响检测环节。"
+                          principle="仅该组的连通测活、带宽测速流量经此代理打向目标节点。"
+                          recommend="需要在特定网络出口测活时填写，如 http://127.0.0.1:10808。"
+                        />
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="http://127.0.0.1:10808 或 socks5://..."
+                        value={g.Proxy || g.proxy || ''}
+                        onChange={(e) => updateGroup(idx, { Proxy: e.target.value.trim(), proxy: e.target.value.trim() })}
                       />
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="http://127.0.0.1:10808 或 socks5://127.0.0.1:10808"
-                      value={g.Proxy || g.proxy || ''}
-                      onChange={(e) => updateGroup(idx, { Proxy: e.target.value.trim(), proxy: e.target.value.trim() })}
-                    />
-                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '3px' }}>
-                      配置后，此组节点的所有连通测活、带宽测速与订阅拉取流量均穿透该代理建立连接。
+                      <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '3px' }}>
+                        只作用于该组节点的测活与测速，不影响订阅拉取。
+                      </div>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', marginBottom: '3px' }}>
+                        拉取代理 (选填)
+                        <InfoTooltip
+                          title="拉取代理 (Fetch Proxy)"
+                          desc="从订阅源下载节点列表时使用的代理，只影响订阅拉取。"
+                          principle="拉取只走这一个代理，不再混入直连与镜像重写策略，确保配置即生效。"
+                          recommend="容器内访问宿主机代理请填 http://host.docker.internal:10801，勿用 127.0.0.1（那是容器自己）。"
+                        />
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="http://host.docker.internal:10801"
+                        value={g.FetchProxy || g.fetch_proxy || ''}
+                        onChange={(e) => updateGroup(idx, { FetchProxy: e.target.value.trim(), fetch_proxy: e.target.value.trim() })}
+                      />
+                      <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '3px' }}>
+                        留空则沿用全局 system-proxy；填写后仅用该代理拉取订阅。
+                      </div>
                     </div>
                   </div>
 

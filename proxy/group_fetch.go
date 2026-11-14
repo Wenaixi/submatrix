@@ -58,7 +58,7 @@ func FetchGroupProxies(grp config.ResolvedGroupConfig) ([]map[string]any, int, e
 			continue
 		}
 
-		data, err := FetchSubsData(fetchURL)
+		data, err := FetchSubsDataWithProxy(fetchURL, grp.FetchProxy)
 		if err != nil {
 			slog.Warn("组订阅拉取失败，跳过", "组", grp.Name, "url", fetchURL, "err", err)
 			lastErr = err

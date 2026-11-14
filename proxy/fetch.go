@@ -292,8 +292,36 @@ func (b *hostBreaker) clear() {
 	b.mu.Unlock()
 }
 
+// overrideProxyKey 决定本次请求使用的代理键。
+//
+// proxyOverride 非空时为组级 fetch-proxy，优先于全局 system-proxy；
+// 否则沿用旧行为：useProxy 为 true 取全局 system-proxy，False 则直连。
+// 返回的键直接作为 getClient 的缓存键，"direct" 表示不走代理。
+func overrideProxyKey(useProxy bool, proxyOverride string) string {
+	if p := strings.TrimSpace(proxyOverride); p != "" {
+		return p
+	}
+	if useProxy {
+		return strings.TrimSpace(config.GlobalConfig.SystemProxy)
+	}
+	return "direct"
+}
+
 // FetchSubsData 获取数据 (包含重试、占位符处理、代理策略)
 func FetchSubsData(rawURL string) ([]byte, error) {
+	return fetchSubsDataWithProxy(rawURL, "")
+}
+
+// FetchSubsDataWithProxy 与 FetchSubsData 行为一致，但使用指定代理拉取订阅。
+//
+// proxyURL 非空时跳过「系统代理可用性检测 + ghproxy 兜底」策略链，直接走该代理；
+// 为空（或组内未配置 fetch-proxy）时完全等价于 FetchSubsData。
+func FetchSubsDataWithProxy(rawURL, proxyURL string) ([]byte, error) {
+	return fetchSubsDataWithProxy(rawURL, proxyURL)
+}
+
+// fetchSubsDataWithProxy FetchSubsData 的内部实现，proxyOverride 见 FetchSubsDataWithProxy。
+func fetchSubsDataWithProxy(rawURL string, proxyOverride string) ([]byte, error) {
 	rawURL = strings.TrimSpace(parse.CleanURL(rawURL))
 	if rawURL == "" {
 		return nil, errors.New("订阅 URL 为空")
@@ -334,9 +362,15 @@ func FetchSubsData(rawURL string) ([]byte, error) {
 	originFunc := func(s string) string { return parse.EnsureScheme(s) }
 
 	strategies := make([]strategy, 0, 3)
-	if utils.IsLocalURL(rawURL) {
+	switch {
+	case utils.IsLocalURL(rawURL):
+		// 本机地址不能交给上游代理：代理端访问不到客户端自己的回环地址。
 		strategies = append(strategies, strategy{useProxy: false, urlFunc: warpFunc})
-	} else {
+	case strings.TrimSpace(proxyOverride) != "":
+		// 组级 fetch-proxy：订阅拉取只走这一个代理，不混入 ghproxy 改写与直连策略，
+		// 避免「配了代理却仍从直连拉取」造成用户以为代理已生效的错觉。
+		strategies = append(strategies, strategy{useProxy: true, urlFunc: originFunc})
+	default:
 		if utils.IsSysProxyAvailable && strings.TrimSpace(config.GlobalConfig.SystemProxy) != "" {
 			strategies = append(strategies, strategy{useProxy: true, urlFunc: originFunc})
 		}
@@ -350,13 +384,9 @@ func FetchSubsData(rawURL string) ([]byte, error) {
 		return nil, errors.New("没有可用的订阅下载策略")
 	}
 
-	// UA 列表池
+	// UA 列表池：统一使用 clash-verge，部分订阅站只认这个 UA（其它 UA 会 403 或返回空节点）
 	uaList := []string{
-		"mihomo/1.19.27",
-		convert.RandUserAgent(),
-		"v2ray",
-		"sing-box/1.13.0",
-		"ClashMetaForAndroid/2.11.30",
+		"clash-verge/v1.6.0",
 	}
 
 	// GitHub 地址使用浏览器 ua 和curl
@@ -399,7 +429,7 @@ func FetchSubsData(rawURL string) ([]byte, error) {
 
 				slog.Debug("尝试下载", "Target", targetURL, "Proxy", strat.useProxy, "round", round+1)
 
-				body, fail := fetchOnce(targetURL, strat.useProxy, timeout, ua)
+				body, fail := fetchOnce(targetURL, strat.useProxy, timeout, ua, proxyOverride)
 				if fail == nil {
 					return body, nil
 				}
@@ -580,11 +610,13 @@ func getClient(proxyAddr string) *http.Client {
 }
 
 // fetchOnce 执行单次 HTTP 请求 (使用连接池)。成功返回 (body, nil)，失败返回 (nil, 失败描述)。
-func fetchOnce(target string, useProxy bool, timeoutSec int, ua string) ([]byte, *fetchFailure) {
+//
+// proxyOverride 非空时使用该地址作为代理（用于组级 fetch-proxy）；
+// 为空时沿用旧行为，即 useProxy 为 true 则取全局 system-proxy。
+func fetchOnce(target string, useProxy bool, timeoutSec int, ua string, proxyOverride string) ([]byte, *fetchFailure) {
 	// 1. 确定 Client Key
-	proxyKey := "direct"
-	if useProxy {
-		proxyKey = strings.TrimSpace(config.GlobalConfig.SystemProxy)
+	proxyKey := overrideProxyKey(useProxy, proxyOverride)
+	if proxyKey != "direct" {
 		if proxyKey == "" {
 			return nil, &fetchFailure{
 				err:   errors.New("系统代理地址为空"),
@@ -634,7 +666,9 @@ func fetchOnce(target string, useProxy bool, timeoutSec int, ua string) ([]byte,
 		return nil, &fetchFailure{err: cached, class: failPermanent}
 	}
 
-	if len(ua) <= 1 {
+	// UA 为空时兜底为随机浏览器 UA；显式传入的 UA 必须原样使用，
+	// 否则 clash-verge 这类只有 19 个字符但必须精确匹配的 UA 会被误替换。
+	if strings.TrimSpace(ua) == "" {
 		ua = convert.RandUserAgent()
 	}
 	req.Header.Set("User-Agent", ua)

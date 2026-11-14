@@ -36,6 +36,7 @@ type GroupConfig struct {
 	Timeout            int      `json:"timeout" yaml:"timeout"`
 	URLs               []string `json:"urls" yaml:"urls"`
 	Proxy              string   `json:"proxy" yaml:"proxy"`
+	FetchProxy         string   `json:"fetch_proxy" yaml:"fetch-proxy"`
 	FilterProtocols    []string `json:"filter_protocols" yaml:"filter-protocols"`
 	SuccessLimit       *int32   `json:"success_limit" yaml:"success-limit"`
 	DownloadMB         *int     `json:"download_mb" yaml:"download-mb"`
@@ -62,6 +63,7 @@ type ResolvedGroupConfig struct {
 	Timeout            int
 	URLs               []string
 	Proxy              string
+	FetchProxy         string
 	FilterProtocols    []string
 	SuccessLimit       int32
 	DownloadMB         int
@@ -115,6 +117,12 @@ func ResolveGroup(g GroupConfig, global Config) ResolvedGroupConfig {
 		enabled = *g.Enabled
 	}
 	proxy := strings.TrimSpace(g.Proxy)
+	// 拉取代理（fetch-proxy）与检测代理（proxy）相互独立：
+	// 组内显式配置优先，未配置时回退全局 system-proxy，保持旧行为不变。
+	fetchProxy := strings.TrimSpace(g.FetchProxy)
+	if fetchProxy == "" {
+		fetchProxy = strings.TrimSpace(global.SystemProxy)
+	}
 	filterProtocols := []string{"http"} // 默认过滤 http 协议
 	if g.FilterProtocols != nil {
 		filterProtocols = g.FilterProtocols
@@ -145,6 +153,7 @@ func ResolveGroup(g GroupConfig, global Config) ResolvedGroupConfig {
 		Timeout:            global.Timeout,
 		URLs:               g.URLs,
 		Proxy:              proxy,
+		FetchProxy:         fetchProxy,
 		FilterProtocols:    filterProtocols,
 		// 组级继承的全局字段（检测层参数化所需）
 		SpeedTestURL: global.SpeedTestURL,
@@ -227,6 +236,7 @@ func ResolveAllGroups(global Config) []ResolvedGroupConfig {
 				OverwriteURL:       "",
 				URLs:               cleanUrls,
 				Proxy:              "",
+				FetchProxy:         global.SystemProxy,
 				FilterProtocols:    []string{"http"},
 				SuccessLimit:       global.SuccessLimit,
 				DownloadMB:         global.DownloadMB,

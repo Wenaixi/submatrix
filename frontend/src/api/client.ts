@@ -99,6 +99,7 @@ export interface GroupItem {
   Timeout?: number;
   URLs?: string[];
   Proxy?: string;
+  FetchProxy?: string;
   FilterProtocols?: string[];
   RulePreset?: string;
   SuccessLimit?: number;
@@ -133,6 +134,8 @@ export interface GroupItem {
   timeout?: number;
   urls?: string[];
   proxy?: string;
+  fetch_proxy?: string;
+  fetchProxy?: string;
   filter_protocols?: string[];
   filterProtocols?: string[];
   rule_preset?: string;

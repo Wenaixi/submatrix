@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Wenaixi/submatrix/config"
 )
 
 func TestStatusErrorKeepsNumericString(t *testing.T) {
@@ -54,7 +56,7 @@ func newTestServer(t *testing.T, h http.HandlerFunc) *httptest.Server {
 func TestFetchOnceNotFoundIsFatal(t *testing.T) {
 	ClearCache()
 	s := newTestServer(t, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(404) })
-	_, fail := fetchOnce(s.URL, false, 10, "test-ua")
+	_, fail := fetchOnce(s.URL, false, 10, "test-ua", "")
 	if fail == nil || !fail.fatal || fail.class != failPermanent {
 		t.Fatalf("404 应为 fatal+permanent, got %+v", fail)
 	}
@@ -66,7 +68,7 @@ func TestFetchOnceRejectsBinary(t *testing.T) {
 	_, _ = rand.Read(bin)
 	bin[3] = 0
 	s := newTestServer(t, func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(bin) })
-	_, fail := fetchOnce(s.URL, false, 10, "test-ua")
+	_, fail := fetchOnce(s.URL, false, 10, "test-ua", "")
 	if fail == nil || !errors.Is(fail.err, errNotText) || fail.class != failPermanent {
 		t.Fatalf("二进制内容应被拒绝, got %+v", fail)
 	}
@@ -76,7 +78,7 @@ func TestFetchOnceReadsTextBody(t *testing.T) {
 	ClearCache()
 	want := strings.Repeat("vless://abc@example.com:443#n\n", 5000) // > sniffBytes，覆盖嗅探 + 余量读取
 	s := newTestServer(t, func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, want) })
-	got, fail := fetchOnce(s.URL, false, 10, "test-ua")
+	got, fail := fetchOnce(s.URL, false, 10, "test-ua", "")
 	if fail != nil {
 		t.Fatalf("unexpected failure: %+v", fail)
 	}
@@ -90,7 +92,7 @@ func TestFetchOnceShortBody(t *testing.T) {
 	// 小于 sniffBytes 的响应体：非空必须原样返回；空响应体按设计判为「空订阅」永久失败
 	for _, body := range []string{"a", "short subscription"} {
 		s := newTestServer(t, func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, body) })
-		got, fail := fetchOnce(s.URL, false, 10, "test-ua")
+		got, fail := fetchOnce(s.URL, false, 10, "test-ua", "")
 		if fail != nil || string(got) != body {
 			t.Fatalf("body=%q: got=%q fail=%+v", body, got, fail)
 		}
@@ -98,7 +100,7 @@ func TestFetchOnceShortBody(t *testing.T) {
 
 	// 空响应体：应判为 failPermanent（空订阅错误），而非成功
 	emptySrv := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {})
-	_, fail := fetchOnce(emptySrv.URL, false, 10, "test-ua")
+	_, fail := fetchOnce(emptySrv.URL, false, 10, "test-ua", "")
 	if fail == nil || fail.class != failPermanent {
 		t.Fatalf("空 body 应为 failPermanent, got %+v", fail)
 	}
@@ -113,14 +115,14 @@ func TestFetchOnceRefusedTripsBreaker(t *testing.T) {
 	addr := l.Addr().String()
 	_ = l.Close() // 关闭监听，后续连接必然被拒绝
 
-	_, f1 := fetchOnce("http://"+addr+"/a", false, 10, "ua")
+	_, f1 := fetchOnce("http://"+addr+"/a", false, 10, "ua", "")
 	if f1 == nil || f1.class != failPermanent || !f1.hostLevel {
 		t.Fatalf("拒绝连接应为 permanent+hostLevel, got %+v", f1)
 	}
 	// 第二次失败后（阈值 2）熔断，同主机其它路径应瞬间返回
-	_, _ = fetchOnce("http://"+addr+"/b", false, 10, "ua")
+	_, _ = fetchOnce("http://"+addr+"/b", false, 10, "ua", "")
 	start := time.Now()
-	_, f3 := fetchOnce("http://"+addr+"/c", false, 10, "ua")
+	_, f3 := fetchOnce("http://"+addr+"/c", false, 10, "ua", "")
 	if f3 == nil || time.Since(start) > 50*time.Millisecond {
 		t.Fatalf("熔断后应瞬间失败, got %+v after %v", f3, time.Since(start))
 	}
@@ -170,5 +172,64 @@ func TestClassifyTransportError(t *testing.T) {
 func TestNodeBatchLevelOrdering(t *testing.T) {
 	if !(keepLevelSuccess > keepLevelHistory && keepLevelHistory > keepLevelNone) {
 		t.Fatal("保留级别必须满足 success > history > none")
+	}
+}
+
+// TestFetchSubsDataWithProxyUsesProxy 验证组级 fetch-proxy 真正生效：
+// 目标地址 127.0.0.2:1 直连必然被拒（且不属于 IsLocalURL 的回环白名单，不会被强制直连），
+// 只有经由前置代理才能拿到数据；因此返回正确内容即证明请求确实走了代理。
+func TestFetchSubsDataWithProxyUsesProxy(t *testing.T) {
+	ClearCache()
+	proxyHit := make(chan string, 1)
+	want := strings.Repeat("vless://abc@example.com:443#n\n", 100)
+
+	// 前置代理：收到任何请求都直接返回订阅内容，并记录被访问的 URI
+	proxySrv := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case proxyHit <- r.RequestURI:
+		default:
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, want)
+	})
+
+	// 目标：127.0.0.2:1 无监听，直连必失败
+	deadURL := "http://127.0.0.2:1/sub.yaml"
+
+	withGlobalOpts(t, config.Config{SubUrlsTimeout: 10, SubUrlsReTry: 0})
+
+	got, err := FetchSubsDataWithProxy(deadURL, proxySrv.URL)
+	if err != nil {
+		t.Fatalf("经代理拉取应成功, got %v", err)
+	}
+	if string(got) != want {
+		t.Fatalf("内容不一致: got %d bytes, want %d bytes", len(got), len(want))
+	}
+
+	select {
+	case uri := <-proxyHit:
+		// HTTP 代理收到的 RequestURI 是绝对形式的目标地址
+		if !strings.Contains(uri, deadURL) {
+			t.Fatalf("代理收到的请求不是目标订阅地址: %s", uri)
+		}
+	default:
+		t.Fatal("代理未被访问，说明请求没有走 fetch-proxy")
+	}
+}
+
+// TestFetchSubsDataWithProxyEmptyFallsBack 验证未配置 fetch-proxy 时不改变旧行为。
+func TestFetchSubsDataWithProxyEmptyFallsBack(t *testing.T) {
+	ClearCache()
+	want := "proxies: []\n"
+	// 目标站点直接可达：空代理参数应走直连策略链并成功
+	s := newTestServer(t, func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, want) })
+	withGlobalOpts(t, config.Config{SubUrlsTimeout: 10, SubUrlsReTry: 0})
+
+	got, err := FetchSubsDataWithProxy(s.URL, "")
+	if err != nil {
+		t.Fatalf("空代理应等价于直连拉取, got %v", err)
+	}
+	if string(got) != want {
+		t.Fatalf("内容不一致: got %q", string(got))
 	}
 }
