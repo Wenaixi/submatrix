@@ -130,7 +130,7 @@ func ResolveGroup(g GroupConfig, global Config) ResolvedGroupConfig {
 
 	rulePreset := strings.TrimSpace(g.RulePreset)
 	if rulePreset == "" {
-		rulePreset = RulePresetProFull // 默认使用主人最详尽分流矩阵
+		rulePreset = RulePresetACL4SSR // 默认使用 ACL4SSR 经典分流（与首尔部署一致）
 	}
 
 	res := ResolvedGroupConfig{
@@ -240,7 +240,7 @@ func ResolveAllGroups(global Config) []ResolvedGroupConfig {
 				RenameNode:         global.RenameNode,
 				AppendOriginalName: global.AppendOriginalName,
 				EnhancedTag:        global.EnhancedTag,
-				RulePreset:         RulePresetProFull,
+				RulePreset:         RulePresetACL4SSR,
 				OverwriteURL:       "",
 				URLs:               cleanUrls,
 				Proxy:              "",
