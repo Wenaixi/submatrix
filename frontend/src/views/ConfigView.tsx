@@ -42,11 +42,14 @@ const QUICK_GROUPS: { title: string; items: QuickSetting[] }[] = [
 ];
 
 // 从 YAML 文本中读取某个顶层标量的当前值（只处理简单 key: value 行）
+// 注意：配置文件在 Windows 下是 CRLF 行尾，split('\n') 后每行末尾残留 \r。
+// 正则里 . 不匹配 \r，若用 (.*)$ 会整行匹配失败（表现为所有输入框读不到值），
+// 因此用非贪婪 (.*?) + \s*\r?$ 显式容忍行尾回车。
 function readYamlValue(content: string, key: string): string {
   const lines = content.split('\n');
   for (const line of lines) {
     // 顶层键（不能有前导空格），形如 key: value 或 key: "value"
-    const m = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
+    const m = line.match(/^([A-Za-z0-9_-]+):\s*(.*?)\s*\r?$/);
     if (m && m[1] === key) {
       return m[2].replace(/^["']|["']$/g, '').replace(/\s+#.*$/, '').trim();
     }
@@ -55,6 +58,7 @@ function readYamlValue(content: string, key: string): string {
 }
 
 // 在 YAML 文本中写入某个顶层标量；不存在则追加到末尾
+// 改写时保留下该行原有的行尾符，避免把 CRLF 文件局部改成 LF 造成混用。
 function writeYamlValue(content: string, key: string, raw: string, type: string): string {
   const lines = content.split('\n');
   const needsQuote = type === 'text' && raw !== '' && !/^\d+$/.test(raw);
@@ -64,7 +68,8 @@ function writeYamlValue(content: string, key: string, raw: string, type: string)
   for (let i = 0; i < lines.length; i++) {
     const m = lines[i].match(/^([A-Za-z0-9_-]+):/);
     if (m && m[1] === key) {
-      lines[i] = `${key}: ${value}`;
+      const cr = lines[i].endsWith('\r') ? '\r' : '';
+      lines[i] = `${key}: ${value}${cr}`;
       found = true;
       break;
     }
