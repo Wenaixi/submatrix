@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -45,6 +46,66 @@ var (
 // LastCheckResultStr 用于给 GUI 状态栏展示
 var LastCheckResultStr atomic.Value
 
+// globalAliveNodes 收集「本轮检测中所有组的可用节点」，按物理指纹去重。
+//
+// 为什么需要它：GenerateAnalysisReport 是 ProxyChecker 的方法，只统计本组结果，
+// 而报告文件是固定文件名、每组覆盖一次，因此最终留下的 global_analysis
+// 只反映最后检测的那一组。而用户看到的「地区分布」应该是所有组合并去重后的全貌。
+//
+// 去重键用 utils.GenerateProxyKey（server + 端口 + 凭据 + SNI/Host 的物理指纹），
+// 同一节点被多个组引用时只算一次；同 IP 不同账号会保留为不同节点。
+var (
+	globalAliveMu    sync.Mutex
+	globalAliveNodes = make(map[string]globalAliveNode)
+	globalAliveOrder []string // 保留插入顺序，让报告输出稳定可复现
+)
+
+type globalAliveNode struct {
+	Name   string
+	Type   string
+	SubURL string
+	Speed  int
+}
+
+// ResetGlobalAliveNodes 清空全局节点集合，每轮完整检测开始时调用一次。
+func ResetGlobalAliveNodes() {
+	globalAliveMu.Lock()
+	globalAliveNodes = make(map[string]globalAliveNode)
+	globalAliveOrder = nil
+	globalAliveMu.Unlock()
+}
+
+// CollectGroupAliveNodes 把某一组的可用节点并入全局集合（按物理指纹去重）。
+func CollectGroupAliveNodes(results []Result) {
+	globalAliveMu.Lock()
+	defer globalAliveMu.Unlock()
+
+	for _, r := range results {
+		if r.Proxy == nil {
+			continue
+		}
+		key := utils.GenerateProxyKey(r.Proxy)
+		if key == "" {
+			continue
+		}
+		if _, exists := globalAliveNodes[key]; exists {
+			continue
+		}
+		name, _ := r.Proxy["name"].(string)
+		pType, _ := r.Proxy["type"].(string)
+		subURL, _ := r.Proxy["sub_url"].(string)
+		globalAliveNodes[key] = globalAliveNode{Name: name, Type: pType, SubURL: subURL, Speed: r.Speed}
+		globalAliveOrder = append(globalAliveOrder, key)
+	}
+}
+
+// GlobalAliveCount 返回当前全局去重后的可用节点数。
+func GlobalAliveCount() int {
+	globalAliveMu.Lock()
+	defer globalAliveMu.Unlock()
+	return len(globalAliveNodes)
+}
+
 // AnalysisStats 统计结构
 type AnalysisStats struct {
 	Total      int
@@ -68,6 +129,86 @@ func newAnalysisStats() *AnalysisStats {
 		CFBlock:   make(map[string]int),
 		NonCF:     make(map[string]int),
 		Media:     make(map[string]int),
+	}
+}
+
+// applyNodeToStats 把单个可用节点计入统计。
+//
+// 抽成独立函数是为了让「单组报告」与「全局合并报告」共用同一套解析口径：
+// 地区来自节点名里的国旗/角标（机场宣称的地区），协议来自 type 字段，
+// 流媒体/AI 解锁来自名称特征。两处若各写一套正则，口径迟早会分叉。
+func applyNodeToStats(s *AnalysisStats, name, pType string, speed int, speedON bool) {
+	s.Total++
+	s.Types[pType]++
+
+	// 如果有速度则累计平均速度
+	if speedON && speed > 0 {
+		s.SpeedSum += speed
+		s.SpeedCount++
+	}
+
+	// 节点属性识别
+	hasTag := false
+	// 由于增加了前缀匹配，submatch 的 index 1 才是真正的国家代码
+	if m := reCFInconsistent.FindStringSubmatch(name); len(m) > 1 {
+		s.CFIncon[m[1]]++
+		s.Countries[m[1]]++
+		hasTag = true
+	}
+	if m := reCFConsistent.FindStringSubmatch(name); len(m) > 1 {
+		s.CFCon[m[1]]++
+		s.Countries[m[1]]++
+		hasTag = true
+	}
+	if m := reCFBlock.FindStringSubmatch(name); len(m) > 1 {
+		s.CFBlock[m[1]]++
+		s.Countries[m[1]]++
+		hasTag = true
+	}
+	if m := reNonCF.FindStringSubmatch(name); len(m) > 1 {
+		s.NonCF[m[1]]++
+		s.Countries[m[1]]++
+		hasTag = true
+	}
+
+	// 如果没有上角标，从国旗 Emoji 提取
+	if !hasTag {
+		if flags := reFlag.FindAllString(name, -1); len(flags) > 0 {
+			for _, f := range flags {
+				code := flagToCode(f)
+				if code != "" {
+					s.Countries[code]++
+				}
+			}
+		}
+	}
+
+	// AI解锁
+	if reMediaGPT.MatchString(name) {
+		if strings.Contains(name, "GPT⁺") {
+			s.Media["GPT+"]++
+		} else {
+			s.Media["GPT"]++
+		}
+	}
+	if reMediaGM.MatchString(name) {
+		s.Media["Gemini"]++
+	}
+	if reMediaCP.MatchString(name) {
+		s.Media["Copilot"]++
+	}
+	// 流媒体解锁
+	if reMediaNF.MatchString(name) {
+		s.Media["Netflix"]++
+	}
+	if reMediaYT.MatchString(name) {
+		s.Media["YouTube"]++
+	}
+	if reMediaTK.MatchString(name) {
+		s.Media["TikTok"]++
+	}
+	if reMediaDis.MatchString(name) {
+		s.Media["Disney+"]++
 	}
 }
 
@@ -110,87 +251,12 @@ func (pc *ProxyChecker) GenerateAnalysisReport() {
 		pType, _ := result.Proxy["type"].(string)
 		name, _ := result.Proxy["name"].(string)
 
-		update := func(s *AnalysisStats) {
-			s.Total++
-			s.Types[pType]++
-
-			// 如果有速度则累计平均速度
-			if speedON && result.Speed > 0 {
-				s.SpeedSum += result.Speed
-				s.SpeedCount++
-			}
-
-			// 节点属性识别
-			hasTag := false
-			// 由于增加了前缀匹配，submatch 的 index 1 才是真正的国家代码
-			if m := reCFInconsistent.FindStringSubmatch(name); len(m) > 1 {
-				s.CFIncon[m[1]]++
-				s.Countries[m[1]]++
-				hasTag = true
-			}
-			if m := reCFConsistent.FindStringSubmatch(name); len(m) > 1 {
-				s.CFCon[m[1]]++
-				s.Countries[m[1]]++
-				hasTag = true
-			}
-			if m := reCFBlock.FindStringSubmatch(name); len(m) > 1 {
-				s.CFBlock[m[1]]++
-				s.Countries[m[1]]++
-				hasTag = true
-			}
-			if m := reNonCF.FindStringSubmatch(name); len(m) > 1 {
-				s.NonCF[m[1]]++
-				s.Countries[m[1]]++
-				hasTag = true
-			}
-
-			// 如果没有上角标，从国旗 Emoji 提取
-			if !hasTag {
-				if flags := reFlag.FindAllString(name, -1); len(flags) > 0 {
-					for _, f := range flags {
-						code := flagToCode(f)
-						if code != "" {
-							s.Countries[code]++
-						}
-					}
-				}
-			}
-
-			// AI解锁
-			if reMediaGPT.MatchString(name) {
-				if strings.Contains(name, "GPT⁺") {
-					s.Media["GPT+"]++
-				} else {
-					s.Media["GPT"]++
-				}
-			}
-			if reMediaGM.MatchString(name) {
-				s.Media["Gemini"]++
-			}
-			if reMediaCP.MatchString(name) {
-				s.Media["Copilot"]++
-			}
-			// 流媒体解锁
-			if reMediaNF.MatchString(name) {
-				s.Media["Netflix"]++
-			}
-			if reMediaYT.MatchString(name) {
-				s.Media["YouTube"]++
-			}
-			if reMediaTK.MatchString(name) {
-				s.Media["TikTok"]++
-			}
-			if reMediaDis.MatchString(name) {
-				s.Media["Disney+"]++
-			}
-		}
-
-		update(globalAnalysis)
+		applyNodeToStats(globalAnalysis, name, pType, result.Speed, speedON)
 		if subURL != "" {
 			if _, ok := subAnalysis[subURL]; !ok {
 				subAnalysis[subURL] = newAnalysisStats()
 			}
-			update(subAnalysis[subURL])
+			applyNodeToStats(subAnalysis[subURL], name, pType, result.Speed, speedON)
 		}
 	}
 
@@ -238,6 +304,76 @@ func (pc *ProxyChecker) GenerateAnalysisReport() {
 
 	// 存入全局变量供 GUI 读取
 	LastCheckResultStr.Store(guiLine)
+}
+
+// WriteGlobalAnalysisReport 用「所有组合并去重后」的可用节点重写报告。
+//
+// 背景：GenerateAnalysisReport 是单组的，每组检测结束时调用一次并把
+// stats/subs-analysis.yaml 整个覆盖，因此磁盘上最终只剩最后一组的 global_analysis。
+// 而报告里的「地区分布 / 协议分布 / 解锁情况」在用户看来应该是全部组的全貌。
+//
+// 本函数在所有组检测完成后调用一次：订阅源级数据（subs_ranking）沿用各组已写入的
+// 结果（SubStats 本身是跨组共享、按 URL 取最大值的），只把 global_analysis
+// 换成全局去重节点的统计。
+func WriteGlobalAnalysisReport() {
+	globalAliveMu.Lock()
+	keys := make([]string, len(globalAliveOrder))
+	copy(keys, globalAliveOrder)
+	nodes := make(map[string]globalAliveNode, len(globalAliveNodes))
+	for k, v := range globalAliveNodes {
+		nodes[k] = v
+	}
+	globalAliveMu.Unlock()
+
+	if len(keys) == 0 {
+		slog.Warn("全局报告跳过：本轮没有任何可用节点")
+		return
+	}
+
+	globalAnalysis := newAnalysisStats()
+	subAnalysis := make(map[string]*AnalysisStats)
+	for _, k := range keys {
+		n := nodes[k]
+		applyNodeToStats(globalAnalysis, n.Name, n.Type, n.Speed, speedON)
+		// 同时按订阅源归类，让 subs_ranking 里的地区/协议/平均速度也是全局口径
+		if n.SubURL != "" {
+			if _, ok := subAnalysis[n.SubURL]; !ok {
+				subAnalysis[n.SubURL] = newAnalysisStats()
+			}
+			applyNodeToStats(subAnalysis[n.SubURL], n.Name, n.Type, n.Speed, speedON)
+		}
+	}
+
+	// 订阅源级数据沿用当前 SubStats（已是跨组共享、按 URL 取最大值）
+	sortedURLs := make([]string, 0, len(proxyutils.SubStats))
+	proxyutils.SubStatsMutex.Lock()
+	for u := range proxyutils.SubStats {
+		sortedURLs = append(sortedURLs, u)
+	}
+	proxyutils.SubStatsMutex.Unlock()
+
+	// 用与本组报告一致的排序口径
+	slices.SortFunc(sortedURLs, func(a, b string) int {
+		proxyutils.SubStatsMutex.Lock()
+		statA, statB := proxyutils.SubStats[a], proxyutils.SubStats[b]
+		proxyutils.SubStatsMutex.Unlock()
+		rateA := float64(statA.Success) / float64(max(1, statA.Total))
+		rateB := float64(statB.Success) / float64(max(1, statB.Total))
+		return cmpFloat(rateB, rateA)
+	})
+
+	// 补齐「没有可用节点」的订阅源：它们仍应出现在 subs_ranking_bad 里，
+	// saveDetailedAnalysis 用 subs[u] == nil 区分好/坏榜单，所以这里只补空条目。
+	for _, u := range sortedURLs {
+		if _, ok := subAnalysis[u]; !ok {
+			subAnalysis[u] = nil
+		}
+	}
+
+	saveDetailedAnalysis(globalAnalysis, subAnalysis, sortedURLs)
+	slog.Info("全局合并报告已生成",
+		"去重可用节点", globalAnalysis.Total,
+		"覆盖地区数", len(globalAnalysis.Countries))
 }
 
 // saveDetailedAnalysis 输出包含总结和可视化数据的报告

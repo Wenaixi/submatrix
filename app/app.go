@@ -430,6 +430,9 @@ func (app *App) checkProxies() error {
 
 	loadHistoricalCheckRate() // 注入历史速率后再开始检测
 
+	// 每轮完整检测开始时清空全局节点集合，避免上一轮的节点残留在本轮报告里
+	check.ResetGlobalAliveNodes()
+
 	check.StartProgress()
 	defer check.StopProgress()
 
@@ -470,6 +473,9 @@ func (app *App) checkProxies() error {
 		totalPulled += int(check.ProxyCount.Load())
 		totalTx += int64(check.TotalBytes.Load())
 
+		// 把本组可用节点并入全局集合（按物理指纹去重），供最终合并报告使用
+		check.CollectGroupAliveNodes(results)
+
 		// 组落盘（all.yaml + mihomo.yaml + history.yaml）
 		save.SaveGroup(grp, results, historyNodes)
 		slog.Info("组检测完成", "组", grp.Name, "可用节点", len(results))
@@ -486,6 +492,11 @@ func (app *App) checkProxies() error {
 	app.lastCheck.Total.Store(int64(totalPulled))
 	app.lastCheck.available.Store(int64(totalResults))
 	app.lastCheck.traffic.Store(totalTx)
+
+	// 用「所有组合并去重」的可用节点重写报告。
+	// 单组报告每组覆盖一次，最终只剩最后一组的地区分布；这里再写一次全局版，
+	// 让报告里的地区/协议/解锁分布反映全部组的全貌。
+	check.WriteGlobalAnalysisReport()
 
 	check.CurrentStepName.Store("发送通知")
 	utils.SendNotifyCheckResult(totalResults, check.CheckTrafficTotal)
