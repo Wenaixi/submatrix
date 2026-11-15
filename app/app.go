@@ -432,6 +432,7 @@ func (app *App) checkProxies() error {
 
 	// 每轮完整检测开始时清空全局节点集合，避免上一轮的节点残留在本轮报告里
 	check.ResetGlobalAliveNodes()
+	check.ResetGlobalSubAnalysis()
 
 	check.StartProgress()
 	defer check.StopProgress()

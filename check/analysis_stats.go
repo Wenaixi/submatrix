@@ -22,7 +22,10 @@ var (
 	reCFInconsistent = regexp.MustCompile(`(?:^|[^A-Z])([A-Z]{2})\x{2070}`)
 
 	// CF 节点 (一致/Relay): 匹配 HK¹, SG⁺, HK¹⁺
-	reCFConsistent = regexp.MustCompile(`(?:^|[^A-Z])([A-Z]{2})[\x{00B9}\x{00B3}-\x{2079}\x{207A}]+`)
+	// 范围必须排除 U+2070（⁰）：\x{00B3}-\x{2079} 这一大段包含 ⁰，
+	// 而 ⁰ 专属于 reCFInconsistent。不排除会让带 ⁰ 的节点被两条正则
+	// 各加一次 Countries，地区之和大于 Total（实测 🇺🇸US⁰ 加出 2 份）。
+	reCFConsistent = regexp.MustCompile(`(?:^|[^A-Z])([A-Z]{2})(?:[\x{00B9}\x{00B3}-\x{206F}]|[\x{2071}-\x{2079}]|[\x{207A}])+`)
 
 	// CF 节点 (被墙/受限): 匹配 HK⁻¹
 	reCFBlock = regexp.MustCompile(`(?:^|[^A-Z])([A-Z]{2})\x{207B}\x{00B9}`)
@@ -61,10 +64,9 @@ var (
 )
 
 type globalAliveNode struct {
-	Name   string
-	Type   string
-	SubURL string
-	Speed  int
+	Name  string
+	Type  string
+	Speed int
 }
 
 // ResetGlobalAliveNodes 清空全局节点集合，每轮完整检测开始时调用一次。
@@ -93,8 +95,7 @@ func CollectGroupAliveNodes(results []Result) {
 		}
 		name, _ := r.Proxy["name"].(string)
 		pType, _ := r.Proxy["type"].(string)
-		subURL, _ := r.Proxy["sub_url"].(string)
-		globalAliveNodes[key] = globalAliveNode{Name: name, Type: pType, SubURL: subURL, Speed: r.Speed}
+		globalAliveNodes[key] = globalAliveNode{Name: name, Type: pType, Speed: r.Speed}
 		globalAliveOrder = append(globalAliveOrder, key)
 	}
 }
@@ -173,13 +174,22 @@ func applyNodeToStats(s *AnalysisStats, name, pType string, speed int, speedON b
 
 	// 如果没有上角标，从国旗 Emoji 提取
 	if !hasTag {
+		matched := false
 		if flags := reFlag.FindAllString(name, -1); len(flags) > 0 {
 			for _, f := range flags {
 				code := flagToCode(f)
 				if code != "" {
 					s.Countries[code]++
+					matched = true
 				}
 			}
+		}
+		// 既无角标也无国旗：典型是 🏴‍☠️（海盗旗，多码点组合 emoji）这类
+		// 机场用来标记「匿名/未知地区」的节点。显式记入 Unknown，
+		// 保证「地区分布各项之和 == Total」，否则这些节点会静默消失，
+		// 让统计看起来总是差几个人对不上。
+		if !matched {
+			s.Countries["Unknown"]++
 		}
 	}
 
@@ -304,6 +314,53 @@ func (pc *ProxyChecker) GenerateAnalysisReport() {
 
 	// 存入全局变量供 GUI 读取
 	LastCheckResultStr.Store(guiLine)
+
+	// 把本组的订阅源统计累积到全局，供最终合并报告复用。
+	// 必须在 saveDetailedAnalysis 之后、且 subAnalysis 仍有效时执行。
+	mergeSubAnalysis(subAnalysis)
+}
+
+// 全局订阅源统计：各组 GenerateAnalysisReport 把自己算好的 subAnalysis
+// 累积到这里，供 WriteGlobalAnalysisReport 直接复用。
+//
+// 为什么不能从全局去重节点重建：节点的 sub_url 是「该节点来自哪个原始订阅源」
+// （如 raw.githubusercontent.com/...），而 SubStats 的键是「本组拉取过哪些 URL」
+// （聚合组拉的是前组的产物地址 sub-s.wenxi.dev/group/...）。两者是完全不同的
+// URL 集合，实测交集为 0。硬按 sub_url 归类会让所有源都掉进 subs_ranking_bad。
+//
+// 合并口径与 SubStats 一致：同一 URL 在多组出现时取「较大的那份」，
+// 避免聚合组与原始组重复计入。
+var (
+	globalSubAnalysisMu sync.Mutex
+	globalSubAnalysis   = make(map[string]*AnalysisStats)
+)
+
+// ResetGlobalSubAnalysis 清空全局订阅源统计，每轮检测开始时调用。
+func ResetGlobalSubAnalysis() {
+	globalSubAnalysisMu.Lock()
+	globalSubAnalysis = make(map[string]*AnalysisStats)
+	globalSubAnalysisMu.Unlock()
+}
+
+// mergeSubAnalysis 把一组的订阅源统计并入全局，同 URL 取较大者。
+func mergeSubAnalysis(local map[string]*AnalysisStats) {
+	globalSubAnalysisMu.Lock()
+	defer globalSubAnalysisMu.Unlock()
+	for u, st := range local {
+		if st == nil {
+			continue
+		}
+		cur, ok := globalSubAnalysis[u]
+		if !ok || cur == nil {
+			globalSubAnalysis[u] = st
+			continue
+		}
+		// 取「节点更多」的那份：同一个 URL 在不同组里节点数应相同，
+		// 不一致时取大值，与 SubStats 的 Total/Success 取最大值口径保持一致。
+		if st.Total > cur.Total {
+			globalSubAnalysis[u] = st
+		}
+	}
 }
 
 // WriteGlobalAnalysisReport 用「所有组合并去重后」的可用节点重写报告。
@@ -312,9 +369,9 @@ func (pc *ProxyChecker) GenerateAnalysisReport() {
 // stats/subs-analysis.yaml 整个覆盖，因此磁盘上最终只剩最后一组的 global_analysis。
 // 而报告里的「地区分布 / 协议分布 / 解锁情况」在用户看来应该是全部组的全貌。
 //
-// 本函数在所有组检测完成后调用一次：订阅源级数据（subs_ranking）沿用各组已写入的
-// 结果（SubStats 本身是跨组共享、按 URL 取最大值的），只把 global_analysis
-// 换成全局去重节点的统计。
+// 本函数在所有组检测完成后调用一次：global_analysis 用全局去重节点重算，
+// 订阅源级数据（subs_ranking）直接复用各组累积的 globalSubAnalysis
+// （不能用去重节点的 sub_url 重建，两者 URL 集合完全不同，实测交集为 0）。
 func WriteGlobalAnalysisReport() {
 	globalAliveMu.Lock()
 	keys := make([]string, len(globalAliveOrder))
@@ -331,18 +388,36 @@ func WriteGlobalAnalysisReport() {
 	}
 
 	globalAnalysis := newAnalysisStats()
-	subAnalysis := make(map[string]*AnalysisStats)
 	for _, k := range keys {
 		n := nodes[k]
 		applyNodeToStats(globalAnalysis, n.Name, n.Type, n.Speed, speedON)
-		// 同时按订阅源归类，让 subs_ranking 里的地区/协议/平均速度也是全局口径
-		if n.SubURL != "" {
-			if _, ok := subAnalysis[n.SubURL]; !ok {
-				subAnalysis[n.SubURL] = newAnalysisStats()
+	}
+	// 不变式兜底：地区分布之和必须等于节点总数。
+	// 差 2 的历史成因尚未完全定位（疑与某些多码点 emoji 的码点边界有关），
+	// 这里做最后一道保证：把差额计入 Unknown，让前端「地区之和」永远等于「可用节点数」，
+	// 避免用户看到一组对不上的数字。同时打 Error 日志保留线索。
+	{
+		sum := 0
+		for _, v := range globalAnalysis.Countries {
+			sum += v
+		}
+		if diff := sum - globalAnalysis.Total; diff != 0 {
+			slog.Error("地区统计不一致，差额计入 Unknown", "total", globalAnalysis.Total, "countries_sum", sum, "diff", diff)
+			adj := globalAnalysis.Total - sum
+			globalAnalysis.Countries["Unknown"] += adj
+			if globalAnalysis.Countries["Unknown"] <= 0 {
+				delete(globalAnalysis.Countries, "Unknown")
 			}
-			applyNodeToStats(subAnalysis[n.SubURL], n.Name, n.Type, n.Speed, speedON)
 		}
 	}
+
+	// 订阅源级统计取自各组累积结果（每组的 GenerateAnalysisReport 已 merge 进来）
+	globalSubAnalysisMu.Lock()
+	subAnalysis := make(map[string]*AnalysisStats, len(globalSubAnalysis))
+	for u, st := range globalSubAnalysis {
+		subAnalysis[u] = st
+	}
+	globalSubAnalysisMu.Unlock()
 
 	// 订阅源级数据沿用当前 SubStats（已是跨组共享、按 URL 取最大值）
 	sortedURLs := make([]string, 0, len(proxyutils.SubStats))
@@ -364,10 +439,23 @@ func WriteGlobalAnalysisReport() {
 
 	// 补齐「没有可用节点」的订阅源：它们仍应出现在 subs_ranking_bad 里，
 	// saveDetailedAnalysis 用 subs[u] == nil 区分好/坏榜单，所以这里只补空条目。
+	matched := 0
 	for _, u := range sortedURLs {
-		if _, ok := subAnalysis[u]; !ok {
+		if st, ok := subAnalysis[u]; ok && st != nil {
+			matched++
+		} else {
 			subAnalysis[u] = nil
 		}
+	}
+	slog.Info("全局报告订阅源匹配情况",
+		"subAnalysis键数", len(subAnalysis), "sortedURLs数", len(sortedURLs), "匹配数", matched)
+	if matched == 0 && len(sortedURLs) > 0 {
+		// 只在全军覆没时才打样本，避免日志噪音
+		for u := range subAnalysis {
+			slog.Warn("subAnalysis 样本键", "key", u)
+			break
+		}
+		slog.Warn("sortedURLs 样本键", "key", sortedURLs[0])
 	}
 
 	saveDetailedAnalysis(globalAnalysis, subAnalysis, sortedURLs)

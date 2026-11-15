@@ -433,6 +433,46 @@ YAML 里所有用户/系统来源的字符串一律 `strconv.Quote`，不要手�
 - 已有的 `buildRemoteSubsYAML` 早就正确用了 `strconv.Quote`，说明正确做法一直清楚，
   只是 `saveDetailedAnalysis` 里漏改。
 
+### 附：sub_url 与 SubStats 的键是两个不相交的集合（2026-11-16 踩坑）
+做全组合并报告时曾试图「用节点的 `sub_url` 重建订阅源排行」，实测失败：
+```
+subAnalysis 键数=24   sortedURLs 键数=24   交集=0
+```
+- `SubStats` 的键 = **本组拉取过哪些 URL**（聚合组拉的是前组产物地址，
+  如 `sub-s.wenxi.dev/group/free-a/all.yaml`）。
+- 节点的 `sub_url` = **该节点来自哪个原始订阅源**（如 `raw.githubusercontent.com/...`）。
+
+这是两个完全不同的维度，混用会让所有源掉进 `subs_ranking_bad`。
+正确做法：`subs_ranking` 用各组 `GenerateAnalysisReport` 算好的 `subAnalysis`
+累积（`mergeSubAnalysis`，同 URL 取较大者）；只有 `global_analysis`
+（地区/协议/解锁）才用全局去重节点重建。
+
+**两种统计的语义边界**：
+- 地区分布 → 必须去重（同一节点不该在多个地区重复计入）
+- 订阅源排行 → 不能去重（每个源要独立评估质量，聚合源的贡献不能被抹掉）
+
+### 地区分布的两个静默错误（2026-11-16 用「和 == Total」校验查出）
+在报告里把地区分布各值相加，与 `alive_count` 对比，一次抓出两个问题：
+
+**1. 海盗旗节点静默消失（差 12）**
+`🏴‍☠️`（`U+1F3F4 U+200D U+2620`）是**多码点组合 emoji**，机场用它标记
+「匿名/未知地区」。`reFlag` 只匹配 `[\x{1F1E6}-\x{1F1FF}]{2}`（两个区域指示符），
+海盗旗不在该范围，于是 `Total` 加了但 `Countries` 没加，节点在分布里凭空消失。
+修法：无角标也无国旗时显式记入 `Countries["Unknown"]`。
+
+**2. `⁰` 节点被重复计地区（多算）**
+`reCFConsistent` 的字符范围是 `[\x{00B9}\x{00B3}-\x{2079}\x{207A}]`，
+而 **U+2070（⁰）正好落在 `\x{00B3}-\x{2079}` 之内**，导致带 `⁰` 的节点
+（本应只由 `reCFInconsistent` 处理）被两条正则各加一次 Countries。
+实测 `🇺🇸US⁰_1|X` 的地区之和为 2，而 Total 为 1。
+修法：把范围拆成 `[\x{00B9}\x{00B3}-\x{206F}]|[\x{2071}-\x{2079}]|[\x{207A}]`，
+排除 U+2070。
+
+**不变式（已写进单测）**：`sum(geography_distribution) == alive_count`。
+改任何统计口径后都必须跑这条校验，它是发现「静默丢节点/重复计数」最便宜的手段。
+
+
+
 ### 验证手法
 改完统计输出后，**不能只看文件内容像不像**（肉眼看着是合法 YAML 也可能解析失败）。
 必须真的跑一次 `goccy/go-yaml` 的 `Unmarshal`，或 curl 接口确认返回体含 `report_data`。

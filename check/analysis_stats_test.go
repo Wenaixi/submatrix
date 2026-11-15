@@ -63,6 +63,7 @@ func TestApplyNodeToStatsCountries(t *testing.T) {
 		{"🇸🇬SG¹_1|X", "SG"},    // CF 一致 ¹
 		{"🇺🇸US⁰_1|X", "US"},    // CF 不一致 ⁰
 		{"🇯🇵JP_1|X", "JP"},     // 只有国旗、无角标
+		{"🏴‍☠️_1|免费A", "Unknown"}, // 海盗旗，无任何地区线索
 	}
 	for _, c := range cases {
 		s := newAnalysisStats()
@@ -72,6 +73,15 @@ func TestApplyNodeToStatsCountries(t *testing.T) {
 		}
 		if s.Total != 1 {
 			t.Errorf("节点名 %q Total 应为 1，实得 %d", c.name, s.Total)
+		}
+		// 核心不变式：地区分布之和必须等于 Total，
+		// 否则报告里各值相加会少于 alive_count，看起来总是差几个人。
+		sum := 0
+		for _, v := range s.Countries {
+			sum += v
+		}
+		if sum != s.Total {
+			t.Errorf("节点名 %q 地区之和 %d != Total %d", c.name, sum, s.Total)
 		}
 	}
 }
