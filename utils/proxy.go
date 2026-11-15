@@ -80,7 +80,9 @@ func IsLocalURL(urlStr string) bool {
 		// 拦截 127.0.0.1.nip.io、169.254.169.254.nip.io 这类「解析到回环/私有的域名」，
 		// 修掉 IsLocalURL 只看文本不查 DNS 的 SSRF 绕过（HIGH）。
 		// 使用 ResolveIPAddr 走系统 DNS；超时兜底保守拦截（宁可误拦不可漏防）。
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		// 超时给足 5 秒：受限网络下境外域名的 DNS 查询偶尔超过 2 秒，
+		// 过短超时会把合法订阅源误判成本机地址，触发「组 URL 不允许指向本机地址」。
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		addrs, resErr := net.DefaultResolver.LookupIPAddr(ctx, host)
 		if resErr != nil {

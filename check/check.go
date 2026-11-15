@@ -33,6 +33,10 @@ import (
 	"github.com/Wenaixi/submatrix/utils"
 )
 
+// reportSettleDelay 是生成检测报告前的固定收敛等待。
+// 让最后一批测速/媒体检测的原子计数与流量统计落定，避免报告漏计刚结束的任务。
+const reportSettleDelay = 10 * time.Second
+
 // 对外暴露变量，兼容GUI调用
 var (
 	Progress   atomic.Uint32 // 已检测数量（语义见算法）
@@ -52,7 +56,6 @@ var (
 	CheckEndTime      time.Time
 	CheckDuration     time.Duration
 	CheckTrafficTotal string
-
 	Fetching atomic.Bool // 拉取订阅阶段
 	Checking atomic.Bool // 检测阶段
 )
@@ -597,7 +600,9 @@ func (pc *ProxyChecker) run(proxies []map[string]any) ([]Result, []map[string]an
 	CheckDuration = time.Since(CheckStartTime)
 
 	CurrentStepName.Store("生成检测报告")
-	time.Sleep(10 * time.Second)
+	// 固定等待让最后一批测速/媒体检测的原子计数与流量统计收敛，
+	// 否则报告会漏掉刚结束的任务。紧随其后的 NetGuard.WaitSettled 才是有条件等待。
+	time.Sleep(reportSettleDelay)
 
 	// 仅当本次检测中出现过拥塞，才等本机网络（NAT 连接表 / DNS / 队列）恢复后再保存、上传、通知，
 	// 否则紧随其后的请求容易撞上残余拥塞而超时。没出现过拥塞时立即返回，最多等 15s。
