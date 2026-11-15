@@ -61,8 +61,16 @@ function readYamlValue(content: string, key: string): string {
 // 改写时保留下该行原有的行尾符，避免把 CRLF 文件局部改成 LF 造成混用。
 function writeYamlValue(content: string, key: string, raw: string, type: string): string {
   const lines = content.split('\n');
-  const needsQuote = type === 'text' && raw !== '' && !/^\d+$/.test(raw);
-  const value = needsQuote ? `"${raw.replace(/"/g, '\\"')}"` : raw;
+  // text 类型的值一律加双引号：
+  // 裸写时 URL 里的 # 会被 YAML 当成注释起始符，整段值被截断
+  // （组间引用常用的 /group/x/all.yaml#tag 就踩这个坑）。
+  // boolean/number 保持裸写，否则 YAML 会把 "true" 当成字符串而非布尔。
+  const needsQuote = type === 'text';
+  // 双引号字符串里反斜杠本身也是转义字符（Windows 路径 C:\Users 会被吞），
+  // 必须先转义反斜杠再转义双引号，顺序不能反。
+  const value = needsQuote
+    ? `"${raw.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+    : raw;
   let found = false;
 
   for (let i = 0; i < lines.length; i++) {

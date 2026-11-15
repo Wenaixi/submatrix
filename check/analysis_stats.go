@@ -372,7 +372,7 @@ func mergeSubAnalysis(local map[string]*AnalysisStats) {
 // 本函数在所有组检测完成后调用一次：global_analysis 用全局去重节点重算，
 // 订阅源级数据（subs_ranking）直接复用各组累积的 globalSubAnalysis
 // （不能用去重节点的 sub_url 重建，两者 URL 集合完全不同，实测交集为 0）。
-func WriteGlobalAnalysisReport() {
+func WriteGlobalAnalysisReport(totalPulled int) {
 	globalAliveMu.Lock()
 	keys := make([]string, len(globalAliveOrder))
 	copy(keys, globalAliveOrder)
@@ -458,14 +458,18 @@ func WriteGlobalAnalysisReport() {
 		slog.Warn("sortedURLs 样本键", "key", sortedURLs[0])
 	}
 
-	saveDetailedAnalysis(globalAnalysis, subAnalysis, sortedURLs)
+	saveDetailedAnalysis(globalAnalysis, subAnalysis, sortedURLs, totalPulled)
 	slog.Info("全局合并报告已生成",
 		"去重可用节点", globalAnalysis.Total,
+		"全组拉取总数", totalPulled,
 		"覆盖地区数", len(globalAnalysis.Countries))
 }
 
-// saveDetailedAnalysis 输出包含总结和可视化数据的报告
-func saveDetailedAnalysis(global *AnalysisStats, subs map[string]*AnalysisStats, sortedURLs []string) {
+// saveDetailedAnalysis 输出包含总结和可视化数据的报告。
+// checkCountOverride > 0 时用它作为「探测节点总数」，
+// 全局报告需要传全组累加值：包级 Progress 只保留最后一组的值，
+// 若沿用会让前端「存活率 = 全局可用 / 单组测活」算出 900%+ 的荒谬数字。
+func saveDetailedAnalysis(global *AnalysisStats, subs map[string]*AnalysisStats, sortedURLs []string, checkCountOverride ...int) {
 	var sb strings.Builder
 	sb.WriteString("# 检测结果分析报告\n")
 	sb.WriteString("# 生成时间: ")
@@ -482,6 +486,10 @@ func saveDetailedAnalysis(global *AnalysisStats, subs map[string]*AnalysisStats,
 	checkCount := Progress.Load()
 	if config.GlobalConfig.ProgressMode == "stage" || ForceClose.Load() || Successlimited.Load() {
 		checkCount = AliveCount.Load()
+	}
+	// 全局报告用调用方给的「全组累加值」，避免与 alive_count 口径不一致
+	if len(checkCountOverride) > 0 && checkCountOverride[0] > 0 {
+		checkCount = uint32(checkCountOverride[0])
 	}
 
 	sb.WriteString("check_info:\n")

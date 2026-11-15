@@ -232,7 +232,9 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, apiKe
 
           // 参数与门槛
           const timeout = g.Timeout ?? g.timeout ?? 3000;
-          const minSpeed = g.MinSpeed ?? g.min_speed ?? g.minSpeed ?? 0;
+          // 保留 null 语义：null = 继承全局，0 = 不过滤，两者不同。
+          // 用 ?? 而不是 ||，否则 0 会被误判成空。
+          const minSpeed = g.MinSpeed ?? g.min_speed ?? g.minSpeed ?? null;
           const overwriteURL = g.OverwriteURL ?? g.overwrite_url ?? g.overwriteUrl ?? "";
 
           // 组级命名与打标扩展
@@ -660,9 +662,16 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, apiKe
                         </label>
                         <input
                           type="number"
-                          placeholder="0 表示不过滤速率"
-                          value={minSpeed || ''}
-                          onChange={(e) => updateGroup(idx, { MinSpeed: parseInt(e.target.value) || 0, min_speed: parseInt(e.target.value) || 0 })}
+                          placeholder="留空 = 继承全局设置；0 表示不过滤速率"
+                          value={minSpeed ?? ''}
+                          onChange={(e) => {
+                            // 留空必须发 null（继承全局），不能发 0：
+                            // 后端 ResolveGroup 是 `if g.MinSpeed != nil { res = *g.MinSpeed }`，
+                            // 发 0 会被当成「本组显式设为 0」，静默覆盖全局配置的速度门槛。
+                            const raw = e.target.value.trim();
+                            const v = raw === '' ? null : parseInt(raw);
+                            updateGroup(idx, { MinSpeed: v, min_speed: v });
+                          }}
                         />
                       </div>
                       <div>

@@ -497,7 +497,11 @@ func (app *App) checkProxies() error {
 	// 用「所有组合并去重」的可用节点重写报告。
 	// 单组报告每组覆盖一次，最终只剩最后一组的地区分布；这里再写一次全局版，
 	// 让报告里的地区/协议/解锁分布反映全部组的全貌。
-	check.WriteGlobalAnalysisReport()
+	//
+	// totalPulled 是本轮所有组「拉取节点数」之和，作为全局报告的分母：
+	// 若不传，报告会用包级 Progress（最后一组的值），导致前端
+	// 「存活率 = 全局可用数 / 单组测活数」出现 988% 这类不可能的数字。
+	check.WriteGlobalAnalysisReport(totalPulled)
 
 	check.CurrentStepName.Store("发送通知")
 	utils.SendNotifyCheckResult(totalResults, check.CheckTrafficTotal)

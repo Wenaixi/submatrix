@@ -127,7 +127,7 @@ export interface GroupItem {
   checkAlive?: boolean;
   check_speed?: boolean;
   checkSpeed?: boolean;
-  min_speed?: number;
+  min_speed?: number | null;
   minSpeed?: number;
   media_check?: boolean;
   mediaCheck?: boolean;
