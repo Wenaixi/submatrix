@@ -3,10 +3,13 @@ package parse
 import (
 	"encoding/hex"
 	"fmt"
-	"github.com/goccy/go-json"
 	"log/slog"
 	"strconv"
 	"strings"
+
+	"github.com/goccy/go-json"
+
+	"github.com/Wenaixi/submatrix/utils"
 )
 
 // NormalizeNode 统一清洗节点字段并验证节点合法性
@@ -16,6 +19,13 @@ func NormalizeNode(m map[string]any) bool {
 	if m == nil {
 		return false
 	}
+
+	// 清掉可能存在的旧指纹缓存：parse 层的 drainLine 会在归一化之前就调
+	// utils.NodeKey 并把结果写进缓存字段。本函数会改写 type / tls 等
+	// 指纹相关字段（https→http+tls、trojan 补 tls），若不清缓存，
+	// 后续 NodeKey 会命中「归一化前」的过期值，使等价节点算出不同指纹，
+	// 去重失效导致同一节点在结果里重复存活。
+	utils.DeleteNodeKey(m)
 
 	// 1. 端口转换
 	if p, ok := m["port"]; ok {

@@ -113,7 +113,9 @@ func GetProxyCountry(httpClient *http.Client, db *maxminddb.Reader, getAnalyzedC
 		}()
 	}
 
-	for range config.GlobalConfig.SubUrlsReTry {
+	// 重试次数下限保护为 1：配置写成 0 时 `for range 0` 一次都不执行，
+	// 会直接跳过 MeAPI 分支且 err 保持 nil，上层无法区分「检测失败」和「没检测」。
+	for range max(1, config.GlobalConfig.SubUrlsReTry) {
 		loc, ip, countryCodeTag, ispTag, err = cliMe.GetAnalyzed(getAnalyzedCtx, cfLoc, cfIP)
 		if err != nil {
 			slog.Debug("MeAPI 获取节点位置失败", "error", err)

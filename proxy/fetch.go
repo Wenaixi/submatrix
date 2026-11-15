@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/metacubex/mihomo/common/convert"
@@ -344,7 +345,8 @@ func fetchSubsDataWithProxy(rawURL string, proxyOverride string) ([]byte, error)
 		return nil, fmt.Errorf("不支持的订阅 URL 协议: %s", parsedURL.Scheme)
 	}
 
-	slog.Debug("正在下载订阅", "URL", rawURL)
+	// 用 stripQuery 脱敏：rawURL 可能含 ?token=<APIKey>，开 debug 会明文落日志
+	slog.Debug("正在下载订阅", "URL", stripQuery(rawURL))
 
 	conf := config.GlobalConfig
 	maxRetries := max(1, conf.SubUrlsReTry)
@@ -427,7 +429,7 @@ func fetchSubsDataWithProxy(rawURL string, proxyOverride string) ([]byte, error)
 					continue
 				}
 
-				slog.Debug("尝试下载", "Target", targetURL, "Proxy", strat.useProxy, "round", round+1)
+				slog.Debug("尝试下载", "Target", stripQuery(targetURL), "Proxy", strat.useProxy, "round", round+1)
 
 				body, fail := fetchOnce(targetURL, strat.useProxy, timeout, ua, proxyOverride)
 				if fail == nil {
@@ -445,7 +447,7 @@ func fetchSubsDataWithProxy(rawURL string, proxyOverride string) ([]byte, error)
 				if errors.As(fail.err, &se) &&
 					(se.code == http.StatusUnauthorized || se.code == http.StatusForbidden) &&
 					strat.useProxy {
-					slog.Debug("代理访问被拒，尝试下一策略", "URL", targetURL, "status", se.code)
+					slog.Debug("代理访问被拒，尝试下一策略", "URL", stripQuery(targetURL), "status", se.code)
 				}
 
 				switch fail.class {
@@ -529,6 +531,77 @@ func lookupViaServers(ctx context.Context, host string, servers []string) []stri
 	return nil
 }
 
+// guardDialer 给 Dialer 装上「连接前目标 IP 校验」，堵住 SSRF 在拨号层的两个绕过路径：
+//
+//  1. 重定向：上游若 302 到 http://169.254.169.254/ 或 http://10.0.0.1:8080/，
+//     客户端会照常拨过去。这里在 Control 回调里拦下。
+//  2. DNS rebinding：预检查时域名解析到公网 IP，实际拨号时解析到内网 IP。
+//     预检查与拨号是两次独立解析，中间有时间窗；Control 拿到的是「真正要连的地址」，
+//     这是唯一可信的校验点。
+//
+// Control 在 connect 之前对每个目标调用（含每次重定向），因此一次覆盖全部跳转。
+//
+// allowed 是「用户显式配置、允许指向内网」的主机白名单：宿主代理
+// （host.docker.internal:10801）与本机 API（listenPort/subStorePort）。
+// 这些是用户正当配置，不能与「订阅源被劫持到内网」混为一谈——
+// 一刀切拦截会直接打断组间引用与 fetch-proxy 功能。
+func guardDialer(d *net.Dialer, allowed map[string]bool) *net.Dialer {
+	d.Control = func(network, address string, _ syscall.RawConn) error {
+		host, _, err := net.SplitHostPort(address)
+		if err != nil {
+			return err
+		}
+		if allowed[host] {
+			return nil
+		}
+		ip := net.ParseIP(host)
+		if ip == nil {
+			return fmt.Errorf("无法解析目标地址: %s", address)
+		}
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() ||
+			ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+			return fmt.Errorf("拒绝连接到本地/内网地址: %s", host)
+		}
+		return nil
+	}
+	return d
+}
+
+// dialGuardAllowlist 收集「允许指向内网」的目标：
+// 用户配置的 fetch-proxy（宿主 Clash；容器内 host.docker.internal 解析到 192.168.x.x）
+// 与本机 API（127.0.0.1 / localhost / ::1，供组间引用）。
+//
+// 注意 Control 拿到的是已解析的 IP，所以主机名必须在这里先解析成 IP 才能命中白名单。
+func dialGuardAllowlist(proxyAddr string) map[string]bool {
+	allowed := map[string]bool{
+		"127.0.0.1": true,
+		"::1":       true,
+		"localhost": true,
+	}
+	add := func(host string) {
+		if host == "" {
+			return
+		}
+		allowed[host] = true
+		if ip := net.ParseIP(host); ip == nil {
+			// 主机名：解析出全部 IP 一并放行（多网卡/双栈时逐个加入）
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host); err == nil {
+				for _, a := range addrs {
+					allowed[a.IP.String()] = true
+				}
+			}
+		}
+	}
+	if proxyAddr != "" && proxyAddr != "direct" {
+		if u, err := url.Parse(proxyAddr); err == nil {
+			add(u.Hostname())
+		}
+	}
+	return allowed
+}
+
 // dialWithDNSFallback 先用系统 DNS 拨号；仅当失败原因是 DNS 解析失败时，
 // 才改用备用 DNS 解析后直连 IP 重试（TLS 的 SNI 仍使用原域名，不受影响）。
 // 备用 DNS 也解析不到时返回原始错误，因此「域名确实不存在」的判定与熔断逻辑保持不变。
@@ -576,11 +649,14 @@ func getClient(proxyAddr string) *http.Client {
 		DisableKeepAlives:   false,            // 开启长连接复用
 
 		// 连接阶段快速失败：死链/黑洞地址不再傻等整个请求超时；
-		// 系统 DNS 解析失败时自动改用备用 DNS 再试
-		DialContext: dialWithDNSFallback(&net.Dialer{
+		// 系统 DNS 解析失败时自动改用备用 DNS 再试。
+		// guardDialer 在每次实际连接前校验目标 IP（含每次重定向），
+		// 堵住「302 到内网」与「DNS rebinding」两条 SSRF 绕过路径；
+		// 白名单内的宿主代理与本机 API 地址不受影响。
+		DialContext: dialWithDNSFallback(guardDialer(&net.Dialer{
 			Timeout:   dialTimeout,
 			KeepAlive: 30 * time.Second,
-		}),
+		}, dialGuardAllowlist(proxyAddr))),
 		TLSHandshakeTimeout: tlsHandshakeTimeout,
 	}
 
@@ -717,7 +793,8 @@ func fetchOnce(target string, useProxy bool, timeoutSec int, ua string, proxyOve
 	if resp.StatusCode >= 400 {
 		// 读取128KB，超过的放弃连接复用
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 128*1024))
-		slog.Debug("错误", "url", req.URL, "代理", useProxy, "状态码", resp.StatusCode, "UA", req.UserAgent())
+		// req.URL 带 query（可能含 token），日志脱敏
+		slog.Debug("错误", "url", stripQuery(req.URL.String()), "代理", useProxy, "状态码", resp.StatusCode, "UA", req.UserAgent())
 		// 401/403 仅是"访问受阻"，不阻断后续策略；404/410 为 fatal
 		return nil, classifyStatus(resp.StatusCode)
 	}

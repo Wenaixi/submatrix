@@ -61,7 +61,9 @@ func FetchGroupProxies(grp config.ResolvedGroupConfig) ([]map[string]any, int, e
 
 		data, err := FetchSubsDataWithProxy(fetchURL, grp.FetchProxy)
 		if err != nil {
-			slog.Warn("组订阅拉取失败，跳过", "组", grp.Name, "url", fetchURL, "err", err)
+			// 日志必须用 stripQuery：fetchURL 展开时已拼入全局 APIKey（?token=xxx），
+			// 直接打印会把密钥明文写进日志文件。
+			slog.Warn("组订阅拉取失败，跳过", "组", grp.Name, "url", stripQuery(fetchURL), "err", err)
 			lastErr = err
 			// 拉取失败也要在统计里留痕，否则报告里该订阅源会整条消失
 			statKey := stripQuery(fetchURL)
@@ -75,7 +77,7 @@ func FetchGroupProxies(grp config.ResolvedGroupConfig) ([]map[string]any, int, e
 
 		nodes, err := fetchGroupSubscription(data, fetchURL)
 		if err != nil {
-			slog.Warn("组订阅解析失败，跳过", "组", grp.Name, "url", fetchURL, "err", err)
+			slog.Warn("组订阅解析失败，跳过", "组", grp.Name, "url", stripQuery(fetchURL), "err", err)
 			lastErr = err
 			continue
 		}
@@ -128,7 +130,7 @@ func FetchGroupProxies(grp config.ResolvedGroupConfig) ([]map[string]any, int, e
 		SubStats[statKey] = st
 		SubStatsMutex.Unlock()
 
-		slog.Info("组订阅已拉取", "组", grp.Name, "url", fetchURL, "节点数", valid)
+		slog.Info("组订阅已拉取", "组", grp.Name, "url", stripQuery(fetchURL), "节点数", valid)
 	}
 
 	if len(all) == 0 {
