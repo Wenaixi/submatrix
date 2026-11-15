@@ -207,6 +207,30 @@
 ### 容器内访问宿主机代理
 - 必须写 `http://host.docker.internal:10801`，**不能用 `127.0.0.1:10801`**（那是容器自己）。
 - 已验证：容器内经该地址拉取同一订阅成功返回 40114 字节。
+- **`--add-host` 里写死的宿主机 IP 会随网络切换而失效（2026-11-15 实测踩坑）**：
+  此前记录的是 `192.168.2.13`，换网络后宿主 WLAN IP 变成 `192.168.1.141`，
+  容器内所有组级 `fetch_proxy` 全部 `i/o timeout`，表现为「4 个组拉取全失败、
+  只有走公网域名的组正常」。重建容器前先用
+  `powershell -NoProfile -Command "Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.IPAddress -like '192.168.*'} | Select -ExpandProperty IPAddress"`
+  确认当前 IP，再写 `--add-host "host.docker.internal:<当前IP>"`。
+- 容器内测端口用 `nc -z host.docker.internal 10801`；**容器没有 curl，也没有 bash 的 `/dev/tcp`**，
+  用 `sh -c 'echo > /dev/tcp/...'` 会得到 `nonexistent directory` 的假阴性。
+
+### 无自定义 DNS 时不要重建 mihomo 解析器（2026-11-15 实测，重要）
+- `SetupMihomoDNS` 在配置里没有 `nameserver` 时，曾经加过「用 `dns.NewResolver(cfg)`
+  重建兜底解析器」的分支。该分支**实测把检测打到全线 0 可用**：
+  hneko 与 mtf 两组 0 可用，且日志显示「开始检测节点」到「可用节点 0」
+  发生在同一秒内——检测根本没有发起连接就全判失败。
+- 根因：mihomo 的 `dns` 包在 `init()` 里构造了一个带 `systemClient` 的
+  `resolver.SystemResolver`（见 `mihomo/dns/system.go`），那才是系统 DNS 的正确实现。
+  用 `dns.NewResolver()` 覆盖它会替换掉这个实现，在受限网络下（容器只放通特定 DNS）
+  导致所有解析秒级失败。
+- 正确认知：`cleanupMihomo` 只把 `DefaultResolver` 置 nil，`SystemResolver`
+  由 mihomo 的 `init()` 保证非 nil；`resolver` 各 `Lookup*`/`Resolve*` 入口在
+  `DefaultResolver` 为 nil 时会自动回退到 `SystemResolver`。
+  因此无自定义 DNS 时**不需要任何重建动作**，直接 return 即可。
+- 识别特征：某组「节点全部 0 可用」+「检测耗时不到 1 秒」= DNS 解析全线失败，
+  优先查解析器状态，不要先去查节点本身。
 
 ### 容器 DNS 必须显式指定，否则 ECH 节点全部失败（2026-11-14）
 - Docker Desktop 默认注入 `192.168.65.7` 作为容器 DNS，该解析器**不返回 HTTPS(type 65) 记录**。
@@ -230,6 +254,12 @@
 - 实测：把 `enabled: true` 改成 `false` 后触发检测，容器仍执行了已禁用的组。
 - 结论：改宿主机 `config.yaml` 后需 `docker restart submatrix-test`；
   通过 WebUI「保存配置」走 `/api/config` 时后端主动写文件并重载，无需重启。
+- **重载语义已收紧（2026-11-15）**：检测进行中收到的配置变更不再立即应用，
+  而是记 `pendingReload`，等本轮检测彻底结束（含 `releaseMemory` 的内存回收）
+  后由 `applyPendingReload` 统一应用。原因是 `loadConfig` 用
+  `*config.GlobalConfig = newConfig` 做逐字段整结构覆盖且无锁，
+  检测中途重载会让正在跑的那轮读到「一半新一半旧」的配置。
+  排查时若发现「改完配置要等一轮检测结束才生效」，这是设计行为，不是故障。
 
 ## 11. 测速地址为空导致节点全灭（2026-11-14 修复）
 
