@@ -2,6 +2,7 @@ package proxies
 
 import (
 	"fmt"
+	neturl "net/url"
 	"log/slog"
 	"strings"
 
@@ -186,15 +187,23 @@ func expandGroupRelativeURL(raw string) (string, error) {
 		return "", fmt.Errorf("public-url 指向本机地址，无法用于组间引用: %s", base)
 	}
 
-	// 拼接 token（订阅鉴权），与网关 UnifiedAuthMiddleware 的 ?token= 通道对齐
+	// 拼接 token（订阅鉴权），与网关 UnifiedAuthMiddleware 的 ?token= 通道对齐。
+	// 必须走 url.Parse + RawQuery：直接字符串拼接时，若组 URL 自带 #fragment
+	// （如 /group/free/all.yaml#free），token 会被拼到 # 之后，永不随请求发送，
+	// 组间引用会静默 401。
 	full := base + u
 	apiKey := strings.TrimSpace(config.GlobalConfig.APIKey)
-	if apiKey != "" && !strings.Contains(full, "token=") {
-		sep := "?"
-		if strings.Contains(full, "?") {
-			sep = "&"
+	if apiKey != "" {
+		parsed, err := neturl.Parse(full)
+		if err != nil {
+			return "", fmt.Errorf("组 URL 解析失败: %w", err)
 		}
-		full += sep + "token=" + apiKey
+		if parsed.Query().Get("token") == "" {
+			q := parsed.Query()
+			q.Set("token", apiKey)
+			parsed.RawQuery = q.Encode()
+		}
+		full = parsed.String()
 	}
 	return full, nil
 }

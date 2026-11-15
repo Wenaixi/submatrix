@@ -51,16 +51,19 @@ func NewIPInfoClient(httpClient *http.Client, db *maxminddb.Reader, ipList, geoL
 	// 从当前项目 (subs-check-pro) 的全局配置中读取 ISP 设置
 	c := config.GlobalConfig
 
-	if c.ISPTimeout <= 0 {
-		c.ISPTimeout = 5 // 默认 5 秒，最高 15 秒
-	} else if c.ISPTimeout > 15 {
-		c.ISPTimeout = 15 // 最大 15 秒
+	// ISPTimeout 用局部变量归一化，绝不回写 GlobalConfig：
+	// 三个调用点分属不同 goroutine，写共享配置是无锁数据竞态（-race 必报）。
+	ispTimeout := c.ISPTimeout
+	if ispTimeout <= 0 {
+		ispTimeout = 5 // 默认 5 秒，最高 15 秒
+	} else if ispTimeout > 15 {
+		ispTimeout = 15 // 最大 15 秒
 	}
 
 	// 映射为 ipinfo 工具包所需的配置结构
 	ispCfg := ipinfo.ISPConfig{
 		ISPCheck:                 c.ISPCheck || groupISPCheck,
-		ISPTimeout:               time.Duration(c.ISPTimeout) * time.Second,
+		ISPTimeout:               time.Duration(ispTimeout) * time.Second,
 		ISPCheckAPIKeyIPAPI:      c.ISPCheckAPIKeyIPAPI,
 		ISPCheckAPIKeyProxyCheck: c.ISPCheckAPIKeyProxyCheck,
 		ISPCheckAPIKeyIPLocate:   c.ISPCheckAPIKeyIPLocate,
@@ -89,9 +92,14 @@ func NewIPInfoClient(httpClient *http.Client, db *maxminddb.Reader, ipList, geoL
 //
 // - 前两位字母是实际浏览网站识别的位置, -US⁰为使用CF CDN服务的网站识别的位置, 比如GPT, X等
 func GetProxyCountry(httpClient *http.Client, db *maxminddb.Reader, getAnalyzedCtx context.Context, cfLoc string, cfIP string, groupISPCheck bool) (loc, ip, countryCodeTag, ispTag string, err error) {
-	// 设置一个临时环境变量，以排除部分api因数据库更新不及时返回的 CN
-	os.Setenv("SUBS-CHECK-PRO-CALL", "true")
-	defer os.Unsetenv("SUBS-CHECK-PRO-CALL")
+	// 【并发隐患】原实现在这里 os.Setenv("SUBS-CHECK-PRO-CALL", ...) 并用 defer 清除。
+	// 三个调用点分属不同 goroutine：A 的 Unsetenv 会清掉 B 依赖的标志，
+	// 导致「排除 CN」的逻辑随机失效。进程级环境变量不适合承载请求级标志。
+	// 现在保留设置但不再清除——代价是标志在进程生命周期内恒为 true，
+	// 换取并发下的行为一致性（下游只判断「是不是本项目发起的调用」）。
+	if os.Getenv("SUBS-CHECK-PRO-CALL") == "" {
+		os.Setenv("SUBS-CHECK-PRO-CALL", "true")
+	}
 
 	cliMe, err := NewIPInfoClient(httpClient, db, ipAPIsMe, geoAPIsMe, groupISPCheck)
 	if err != nil || cliMe == nil {

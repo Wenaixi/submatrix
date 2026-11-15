@@ -227,6 +227,21 @@ func NewProxyChecker(proxyCount int, grp config.ResolvedGroupConfig) *ProxyCheck
 		speedChanLength = 1 // 不启用测速时，设置为最小缓冲
 	}
 
+	// 三个阶段的并发数都必须 >= 1：
+	// 为 0 时对应阶段的 worker 循环一个都不启动，而 distributeJobs 仍会向
+	// 该阶段通道发送任务，发送方与接收方互相等待 → 整个检测永久挂起
+	// （runMediaStageAndCollect 的 wg.Wait 永不返回）。
+	// proxyCount 为 0 时上游已拦截，这里防御的是用户显式把并发配成 0 的情况。
+	if aliveConc < 1 {
+		aliveConc = 1
+	}
+	if speedConc < 1 {
+		speedConc = 1
+	}
+	if mediaConc < 1 {
+		mediaConc = 1
+	}
+
 	return &ProxyChecker{
 		proxyCount:  proxyCount,
 		threadCount: threadCount,
@@ -261,6 +276,15 @@ func CheckGroup(grp config.ResolvedGroupConfig) ([]Result, []map[string]any, err
 	ProxyCount.Store(0)
 	Available.Store(0)
 	Progress.Store(0)
+
+	// 以下四项必须与上面同步重置：app 层是多组串行循环，
+	// 漏重置会让第 2 组起把前面组的量叠加进来，导致报告与 GUI 数字虚高。
+	// AliveCount/Processed 供 checkCount 取「本次测活数」，
+	// UP/DOWN 供报告的 check_traffic_upload/download_raw。
+	AliveCount.Store(0)
+	Processed.Store(0)
+	UP.Store(0)
+	DOWN.Store(0)
 
 	TotalBytes.Store(0)
 
@@ -950,7 +974,9 @@ func (pc *ProxyChecker) runSpeedStage(ctx context.Context, cancel context.Cancel
 func (pc *ProxyChecker) runMediaStageAndCollect(db *maxminddb.Reader, ctx context.Context, cancel context.CancelFunc) {
 	var wg sync.WaitGroup
 	resultLength := pc.mediaConcurrent
-	if pc.grp.SuccessLimit != 0 {
+	// 判据必须是 > 0：SuccessLimit 为负数时会 make(chan, 负数) 直接 panic，
+	// 且发生在阶段推进中途（数据未落盘）。配置层虽无负数，防御在这里。
+	if pc.grp.SuccessLimit > 0 {
 		resultLength = int(pc.grp.SuccessLimit)
 	}
 
@@ -1844,6 +1870,11 @@ func (pc *ProxyChecker) scoreAndRecycle(proxy map[string]any, state string, spee
 
 	// 如果扣除后大于 0 就能留在历史库中
 	if score > 0 {
+		// 入池前剥离 group_proxy：历史池走的是与 results 不同的路径，
+		// CleanupMetadata 只清理 pc.results，覆盖不到这里。
+		// 该字段是组级前置代理的完整 URL，可能含 user:pass，而 history.yaml 会落盘分发。
+		// 注意 sub_url / sub_tag / history_score 必须保留，历史池靠它们做归属与评分复用。
+		delete(proxy, "group_proxy")
 		proxy["history_score"] = score
 		pc.historyChan <- proxy
 	}
