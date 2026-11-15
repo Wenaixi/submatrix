@@ -163,8 +163,8 @@ func (app *App) initConfigWatcher() error {
 
 	app.watcher = watcher
 
-	// 防抖定时器：避免 VSCode 等编辑器先写临时文件再覆盖产生的连续两次 write 事件
-	var debounceTimer *time.Timer
+	// 防抖定时器：避免 VSCode 等编辑器先写临时文件再覆盖产生的连续两次 write 事件。
+	// 用 App 字段而不是局部变量，Shutdown 才能 Stop 掉尚未触发的回调。
 	go func() {
 		for {
 			select {
@@ -177,15 +177,16 @@ func (app *App) initConfigWatcher() error {
 				}
 				// 兼容容器外修改
 				if event.Op&(fsnotify.Write|fsnotify.Create) != 0 {
-					// 如果定时器存在，重置它
-					if debounceTimer != nil {
-						debounceTimer.Stop()
+					app.debounceTimerMu.Lock()
+					if app.debounceTimer != nil {
+						app.debounceTimer.Stop()
 					}
 
 					// 创建新的定时器，延迟100ms执行
-					debounceTimer = time.AfterFunc(100*time.Millisecond, func() {
+					app.debounceTimer = time.AfterFunc(100*time.Millisecond, func() {
 						app.tryReloadByModTime()
 					})
+					app.debounceTimerMu.Unlock()
 				}
 			case err, ok := <-watcher.Errors:
 				if !ok {
@@ -232,19 +233,31 @@ func (app *App) pollConfigFile(ctx context.Context) {
 // inotify 事件与轮询 tick 都经由这里，用 configModMu 串行化、用 lastConfigMod 去重：
 // 只有 mtime 相对上一次重载确实前进时才真正执行 onConfigChange，
 // 因此两个机制同时在线也不会重复重载。
+//
+// 注意：锁内只做 stat 与 mtime 比较（微秒级）。onConfigChange 里有
+// ReStartSubStore 这类秒级阻塞调用，若持锁执行会把轮询 tick 与 inotify 事件
+// 全部堵死，期间配置的后续修改只能排队。因此副作用在锁外执行，
+// 用 reloading 的 CAS 保证「同一时刻只有一次重载在跑」。
 func (app *App) tryReloadByModTime() {
 	app.configModMu.Lock()
-	defer app.configModMu.Unlock()
-
 	info, err := os.Stat(app.configPath)
 	if err != nil {
 		// 文件暂时不可读（编辑器替换中 / 被删除），跳过本轮，下次 tick 再试
+		app.configModMu.Unlock()
 		return
 	}
 	if !info.ModTime().After(app.lastConfigMod) {
+		app.configModMu.Unlock()
 		return
 	}
 	app.lastConfigMod = info.ModTime()
+	app.configModMu.Unlock()
+
+	// 已有一轮重载在执行，本次跳过：正在跑的那轮会读到同一个 mtime 的文件
+	if !app.reloading.CompareAndSwap(false, true) {
+		return
+	}
+	defer app.reloading.Store(false)
 
 	slog.Info("配置文件发生变化，正在重新加载", "mtime", info.ModTime().Format("15:04:05"))
 	app.onConfigChange()

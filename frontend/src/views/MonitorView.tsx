@@ -15,6 +15,9 @@ export const MonitorView: React.FC = () => {
   useEffect(() => {
     let timer: any = null;
     const poll = async () => {
+      // 页面在后台时跳过：浏览器会节流定时器，但切回前台仍会堆积一次无用请求。
+      // 直接跳过能省掉后台标签页每 2 秒两次 API 调用。
+      if (document.hidden) return;
       try {
         const s = await getStatus();
         setStatus(s);
@@ -26,7 +29,13 @@ export const MonitorView: React.FC = () => {
     };
     poll();
     timer = setInterval(poll, 2000);
-    return () => clearInterval(timer);
+    // 切回前台立刻刷新一次，避免等待下一个 2 秒周期
+    const onVisible = () => { if (!document.hidden) poll(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
 
   // 自动滚屏

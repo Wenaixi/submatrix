@@ -43,7 +43,16 @@ type App struct {
 	// inotify 事件与轮询 tick 共用它，只有 mtime 真正前进才触发 onConfigChange。
 	lastConfigMod time.Time
 	configModMu   sync.Mutex
-	checkChan     chan struct{} // 触发检测的通道
+	// reloading 保证同一时刻只有一轮 onConfigChange 在执行。
+	// 与 configModMu 分离：锁只保护 mtime 比较，副作用（SubStore 重启等秒级操作）
+	// 在锁外执行，避免堵死轮询 tick。
+	reloading atomic.Bool
+	// debounceTimer 是 inotify 事件的防抖定时器（避免编辑器写临时文件产生两次事件）。
+	// 提升为字段是为了让 Shutdown 能 Stop 它：否则关闭窗口内回调仍可能触发
+	// onConfigChange → setTimer → close(app.done)，造成二次关闭 panic。
+	debounceTimerMu sync.Mutex
+	debounceTimer   *time.Timer
+	checkChan       chan struct{} // 触发检测的通道
 	checking      atomic.Bool   // 检测状态标志
 	ticker        *time.Ticker
 	done          chan struct{} // 用于结束ticker goroutine的信号
@@ -338,12 +347,15 @@ func (app *App) setTimer() {
 func (app *App) useIntervalTimer() {
 	// 初始化定时器
 	app.ticker = time.NewTicker(time.Duration(app.interval) * time.Minute)
+	// 捕获局部变量：setTimer 会在另一 goroutine 把 app.ticker 置 nil，
+	// 循环里直接读字段会撞上 nil 解引用 panic。
+	ticker := app.ticker
 	done := app.done
 	// 启动一个goroutine监听定时器事件
 	go func() {
 		for {
 			select {
-			case <-app.ticker.C:
+			case <-ticker.C:
 				app.triggerCheck()
 			case <-done:
 				return // 收到停止信号，退出goroutine
@@ -391,10 +403,11 @@ func (app *App) triggerCheck() {
 	}
 	check.CurrentStepName.Store("检测完成")
 
-	// 手动标记检测完成
-	app.checking.Store(false)
-
 	// 释放内存
+	// 注意：不要在这里提前 checking.Store(false)。releaseMemory 内部最长要等 30 秒
+	// 让残留 goroutine 退出，该窗口内若放行下一次检测，两次检测会并发操作
+	// resolver.DefaultResolver（cleanupMihomo 会把它置 nil），产生数据竞争。
+	// 由函数开头的 defer app.checking.Store(false) 统一负责解锁。
 	releaseMemory()
 }
 
@@ -420,6 +433,7 @@ func (app *App) checkProxies() error {
 	var (
 		totalResults  int
 		totalTx       int64
+		totalPulled   int
 		activeGroups  int
 	)
 
@@ -444,6 +458,9 @@ func (app *App) checkProxies() error {
 
 		activeGroups++
 		totalResults += len(results)
+		// CheckGroup 内部会把 ProxyCount 重置为「本组节点数」，
+		// 必须在每组结束后立刻取走再累加，否则多组会把前组的量覆盖掉。
+		totalPulled += int(check.ProxyCount.Load())
 		totalTx += int64(check.TotalBytes.Load())
 
 		// 组落盘（all.yaml + mihomo.yaml + history.yaml）
@@ -457,7 +474,9 @@ func (app *App) checkProxies() error {
 	// 所有组处理完，汇总计数
 	app.lastCheck.time.Store(time.Now())
 	app.lastCheck.duration.Store(int64(time.Since(startTime).Seconds()))
-	app.lastCheck.Total.Store(int64(totalResults))
+	// Total 是「拉取到的节点总数」，available 是「测活通过的节点数」。
+	// 两者赋同一值会让前端可用率恒为 100%，监控失去意义。
+	app.lastCheck.Total.Store(int64(totalPulled))
 	app.lastCheck.available.Store(int64(totalResults))
 	app.lastCheck.traffic.Store(totalTx)
 
@@ -549,6 +568,15 @@ func (app *App) Shutdown() error {
 	if app.watcherCancel != nil {
 		app.watcherCancel()
 	}
+
+	// 停掉尚未触发的 inotify 防抖回调：若不拦，它可能在关闭窗口内
+	// 触发 onConfigChange → setTimer → close(app.done)，造成二次关闭 panic。
+	app.debounceTimerMu.Lock()
+	if app.debounceTimer != nil {
+		app.debounceTimer.Stop()
+		app.debounceTimer = nil
+	}
+	app.debounceTimerMu.Unlock()
 
 	// 取消上下文，通知各子服务退出（sub-store 等）
 	if app.cancel != nil {

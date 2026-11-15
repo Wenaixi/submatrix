@@ -198,28 +198,18 @@ func deduplicateByProxyKey(proxies []map[string]any) []map[string]any {
 }
 
 // sanitizeProxyForYAML 清洗节点字典，防止外部源中由于 !!binary 导致的类型不匹配与序列化崩溃
+// sanitizeProxyForYAML 把节点 map 里的非字符串值清洗成 YAML 可安全序列化的形态。
+//
+// 关键点：[]byte 必须递归到任意深度。此前只处理顶层与一层 []any，
+// 而 ws-opts / plugin-opts / reality-opts 这类嵌套 map 里的 []byte
+// 会被 YAML 编成 !!binary，客户端无法解析。
 func sanitizeProxyForYAML(raw map[string]any) map[string]any {
 	if raw == nil {
 		return nil
 	}
 	clean := make(map[string]any, len(raw))
 	for k, v := range raw {
-		switch val := v.(type) {
-		case []byte:
-			clean[k] = string(val)
-		case []any:
-			subList := make([]any, len(val))
-			for i, elem := range val {
-				if b, ok := elem.([]byte); ok {
-					subList[i] = string(b)
-				} else {
-					subList[i] = elem
-				}
-			}
-			clean[k] = subList
-		default:
-			clean[k] = val
-		}
+		clean[k] = sanitizeYAMLValue(v)
 	}
 	for _, stringKey := range []string{"cipher", "password", "server", "name", "raw_name", "type", "network"} {
 		if val, exists := clean[stringKey]; exists && val != nil {
@@ -229,6 +219,31 @@ func sanitizeProxyForYAML(raw map[string]any) map[string]any {
 		}
 	}
 	return clean
+}
+
+// sanitizeYAMLValue 递归清洗任意层级的值：[]byte → string，map 与切片逐层下钻。
+func sanitizeYAMLValue(v any) any {
+	switch val := v.(type) {
+	case []byte:
+		return string(val)
+	case map[string]any:
+		if val == nil {
+			return nil
+		}
+		out := make(map[string]any, len(val))
+		for k, inner := range val {
+			out[k] = sanitizeYAMLValue(inner)
+		}
+		return out
+	case []any:
+		out := make([]any, len(val))
+		for i, elem := range val {
+			out[i] = sanitizeYAMLValue(elem)
+		}
+		return out
+	default:
+		return val
+	}
 }
 
 // fetchTemplateByPreset 根据规则预设标识符加载对应的分流规则模板
@@ -386,8 +401,10 @@ func SaveGroup(grp config.ResolvedGroupConfig, results []check.Result, historyPo
 
 	// 4. 落盘 all-raw.yaml（全量原始，含 skipped 未检测节点）
 	if len(rawList) > 0 {
-		if data, err := yaml.Marshal(map[string]any{"proxies": rawList}); err == nil {
-			_ = os.WriteFile(filepath.Join(groupDir, "all-raw.yaml"), data, 0644)
+		if data, err := yaml.Marshal(map[string]any{"proxies": rawList}); err != nil {
+			slog.Error("序列化全量原始节点失败", "组", grp.Name, "err", err)
+		} else {
+			writeGroupFile(filepath.Join(groupDir, "all-raw.yaml"), data)
 		}
 	}
 
@@ -406,13 +423,26 @@ func SaveGroup(grp config.ResolvedGroupConfig, results []check.Result, historyPo
 		}
 		if len(pool) > 0 {
 			deduped := deduplicateByProxyKey(pool)
-			if data, err := yaml.Marshal(map[string]any{"proxies": deduped}); err == nil {
-				_ = os.WriteFile(filepath.Join(groupDir, "history.yaml"), data, 0644)
+			if data, err := yaml.Marshal(map[string]any{"proxies": deduped}); err != nil {
+				slog.Error("序列化组历史池失败", "组", grp.Name, "err", err)
+			} else {
+				writeGroupFile(filepath.Join(groupDir, "history.yaml"), data)
 			}
 		}
 	}
 
 	slog.Info("组产物已落盘", "组", grp.Name, "节点", len(proxiesList), "历史", len(historyPool))
+}
+
+// writeGroupFile 落盘单个组文件并检查写入结果。
+// 原先一律 `_ = os.WriteFile`，磁盘满/权限不足时静默失败，日志却照打「已落盘」，
+// 对外长期提供陈旧产物且无法定位。返回是否成功，供调用方决定是否打印成功日志。
+func writeGroupFile(path string, data []byte) bool {
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		slog.Error("组产物写入失败", "path", path, "err", err)
+		return false
+	}
+	return true
 }
 
 // writeGroupYAML 把一组节点写入 groups/<name>/all.yaml 与 mihomo.yaml（按规则预设融合）。
@@ -436,27 +466,29 @@ func writeGroupYAML(grp config.ResolvedGroupConfig, proxiesList []map[string]any
 	// 节点上限已在 SaveGroup 截取（本函数为内部落盘点，不再重复截取）
 
 	allYamlData, err := yaml.Marshal(map[string]any{"proxies": proxiesList})
-	if err == nil {
-		_ = os.WriteFile(filepath.Join(groupDir, "all.yaml"), allYamlData, 0644)
+	if err != nil {
+		slog.Error("序列化组节点失败，跳过写入", "组", grp.Name, "err", err)
+		return
 	}
+	writeGroupFile(filepath.Join(groupDir, "all.yaml"), allYamlData)
 
 	if grp.RulePreset == config.RulePresetDirectPure {
-		_ = os.WriteFile(filepath.Join(groupDir, "mihomo.yaml"), allYamlData, 0644)
+		writeGroupFile(filepath.Join(groupDir, "mihomo.yaml"), allYamlData)
 		return
 	}
 
 	mihomoData, err := buildGroupMihomoYAML(grp, proxiesList)
 	switch {
 	case err == nil && len(mihomoData) > 0:
-		_ = os.WriteFile(filepath.Join(groupDir, "mihomo.yaml"), mihomoData, 0644)
+		writeGroupFile(filepath.Join(groupDir, "mihomo.yaml"), mihomoData)
 	case err != nil:
 		// 模板加载/解析失败：必须记录并降级，否则客户端拿不到 mihomo.yaml 而日志毫无线索
 		slog.Warn("合并组规则模板失败，降级保存纯节点列表",
 			"group", grp.Name, "preset", grp.RulePreset, "err", err)
-		_ = os.WriteFile(filepath.Join(groupDir, "mihomo.yaml"), allYamlData, 0644)
+		writeGroupFile(filepath.Join(groupDir, "mihomo.yaml"), allYamlData)
 	default:
 		// err == nil 且模板为空：仅纯节点模式（direct_pure 已提前 return），视为异常但可降级
 		slog.Warn("规则模板为空，降级保存纯节点列表", "group", grp.Name, "preset", grp.RulePreset)
-		_ = os.WriteFile(filepath.Join(groupDir, "mihomo.yaml"), allYamlData, 0644)
+		writeGroupFile(filepath.Join(groupDir, "mihomo.yaml"), allYamlData)
 	}
 }

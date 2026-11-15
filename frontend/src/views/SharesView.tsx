@@ -84,7 +84,21 @@ export const SharesView: React.FC<SharesViewProps> = ({ groups }) => {
   };
 
   const copy = (text: string) => {
-    navigator.clipboard.writeText(text).then(() => showToast('链接已复制'));
+    // http 明文访问下 navigator.clipboard 为 undefined，直接调用会抛 TypeError，
+    // 导致复制静默失败。这里既做存在性判断，也捕获剪贴板被拒（非用户手势/权限拒绝）。
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text)
+        .then(() => showToast('链接已复制'))
+        .catch(() => showToast('复制失败，请手动复制', true));
+      return;
+    }
+    const inp = document.createElement('input');
+    inp.value = text;
+    document.body.appendChild(inp);
+    inp.select();
+    document.execCommand('copy');
+    inp.remove();
+    showToast('链接已复制');
   };
 
   const fmtTime = (t: string) => t ? new Date(t).toLocaleString() : '—';

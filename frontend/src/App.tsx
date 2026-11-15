@@ -6,7 +6,8 @@ import {
   getStatus,
   triggerCheck,
   getApiKey,
-  setApiKey
+  setApiKey,
+  setUnauthorizedHandler
 } from './api/client';
 import { GroupsView } from './views/GroupsView';
 import { MonitorView } from './views/MonitorView';
@@ -32,11 +33,12 @@ import {
 export const App: React.FC = () => {
   const { showToast } = useToast();
   
-  const parseTab = (): 'groups' | 'monitor' | 'files' | 'analysis' | 'config' => {
+  const parseTab = (): 'groups' | 'monitor' | 'files' | 'analysis' | 'shares' | 'config' => {
     const p = window.location.pathname;
     const h = window.location.hash;
     if (p.includes('/files') || h === '#files') return 'files';
     if (p.includes('/analysis') || h === '#analysis') return 'analysis';
+    if (h === '#shares') return 'shares';
     if (h === '#monitor') return 'monitor';
     if (h === '#config') return 'config';
     return 'groups';
@@ -54,6 +56,14 @@ export const App: React.FC = () => {
   const [apiKey, setKey] = useState(getApiKey());
   const [keyModalOpen, setKeyModalOpen] = useState(false);
   const [tempKey, setTempKey] = useState(apiKey);
+
+  // 每次打开密钥弹窗时，把编辑框重置为当前已保存的密钥。
+  // 否则 tempKey 只在挂载时初始化一次，后续打开会显示上一次的旧值，
+  // 用户点保存就会把新密钥覆盖回旧值。
+  const openKeyModal = () => {
+    setTempKey(apiKey);
+    openKeyModal();
+  };
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -90,9 +100,7 @@ export const App: React.FC = () => {
       if (gRes.listenPort) setListenPort(gRes.listenPort);
       if (gRes.apiKey) setKey(gRes.apiKey);
     } catch (e: any) {
-      if (e.message === 'UNAUTHORIZED') {
-        setKeyModalOpen(true);
-      }
+      // 401 由 client.ts 的全局回调统一弹密钥框，这里不再单独处理，避免重复弹窗
     }
 
     try {
@@ -103,9 +111,17 @@ export const App: React.FC = () => {
     }
   };
 
+  // 注册全局 401 处理：任何视图的 API 请求鉴权失败都会弹密钥框
+  useEffect(() => {
+    setUnauthorizedHandler(openKeyModal);
+    return () => setUnauthorizedHandler(null);
+  }, [apiKey]);
+
   useEffect(() => {
     loadData();
     const interval = setInterval(() => {
+      // 页面隐藏时跳过轮询，避免后台标签页持续请求
+      if (document.hidden) return;
       getStatus().then(setTelemetry).catch(() => {});
     }, 3000);
     return () => clearInterval(interval);
@@ -239,7 +255,7 @@ export const App: React.FC = () => {
         <div style={{ padding: '16px 20px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
             <span style={{ color: 'var(--text-secondary)' }}>端口: {listenPort.replace(':', '')}</span>
-            <button onClick={() => setKeyModalOpen(true)} className="btn-ghost" style={{ padding: '2px 6px', fontSize: '11px' }}>
+            <button onClick={openKeyModal} className="btn-ghost" style={{ padding: '2px 6px', fontSize: '11px' }}>
               <KeyRound size={12} /> API 密钥
             </button>
           </div>

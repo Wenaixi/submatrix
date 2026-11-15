@@ -27,11 +27,9 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, apiKe
       const copy = [...prev];
       const [moved] = copy.splice(from, 1);
       copy.splice(to, 0, moved);
-      copy.forEach((g, i) => {
-        g.Priority = i;
-        g.priority = i;
-      });
-      return copy;
+      // 逐项浅拷贝后再改 priority：直接改 state 内的对象会破坏不可变约定，
+      // 让 React 的引用比较与后续 diff 都失效。
+      return copy.map((g, i) => ({ ...g, Priority: i, priority: i }));
     });
     showToast("顺序已调整，点击「保存配置」生效");
   };
@@ -69,6 +67,8 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, apiKe
       await toggleGroup(name, checked);
       showToast(`分组 [${name}] 状态已更新`);
     } catch (err: any) {
+      // 失败必须回滚本地状态，否则 UI 显示已启用/已停用而后端没变，两边长期不一致
+      updateGroup(idx, { Enabled: !checked, enabled: !checked });
       showToast(`切换失败: ${err.message}`, true);
     }
   };
@@ -81,28 +81,50 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, apiKe
 
   // 新增分组
   const addGroup = () => {
-    const newIdx = groups.length + 1;
+    const newName = nextGroupName(groups);
+    const newDisplay = "新分组 " + newName.replace("group-", "");
+    // 键名必须与后端 config.GroupConfig 的 JSON tag 对齐（下划线风格）。
+    // 后端 ShouldBindJSON 只会按 tag 绑定，或回退到「字段名忽略大小写」匹配，
+    // 因此 display_name / rule_preset 这类带下划线的 tag 用 PascalCase 发送会全部丢失。
     setGroups(prev => [
       ...prev,
       {
-        Name: "group-" + newIdx,
-        DisplayName: "新分组 " + newIdx,
+        Name: newName,
+        name: newName,
+        DisplayName: newDisplay,
+        display_name: newDisplay,
         Tag: "GRP",
+        tag: "GRP",
         Enabled: true,
+        enabled: true,
         CheckAlive: true,
+        check_alive: true,
         CheckSpeed: false,
+        check_speed: false,
         RenameNode: true,
+        rename_node: true,
         AppendOriginalName: false,
-        TagIPType: true,
+        append_original_name: false,
         MediaCheck: false,
+        media_check: false,
         DropOnFail: true,
+        drop_on_fail: true,
         MinSpeed: 0,
+        min_speed: 0,
         Timeout: 3000,
+        timeout: 3000,
         OverwriteURL: "",
+        overwrite_url: "",
         RulePreset: "pro_full",
+        rule_preset: "pro_full",
         FilterProtocols: ["http"],
+        filter_protocols: ["http"],
         Proxy: "",
-        URLs: []
+        proxy: "",
+        FetchProxy: "",
+        fetch_proxy: "",
+        URLs: [],
+        urls: []
       }
     ]);
     showToast("已创建新分组模板，编辑后请保存");
@@ -115,6 +137,17 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, apiKe
     if (confirm(`确定删除分组 [${name}] 吗？`)) {
       setGroups(prev => prev.filter((_, i) => i !== idx));
       showToast("分组已移除，点击右上角保存即可写入配置");
+    }
+  };
+
+  // 生成唯一组名：删除后新增时，length+1 可能与现存组重名，后端按名去重会直接 400
+  const nextGroupName = (list: GroupItem[]): string => {
+    for (let i = list.length + 1; ; i++) {
+      const candidate = "group-" + i;
+      const exists = list.some(g => (g.Name || g.name) === candidate);
+      if (!exists && !list.some(g => g.DisplayName === "新分组 " + i)) {
+        return candidate;
+      }
     }
   };
 

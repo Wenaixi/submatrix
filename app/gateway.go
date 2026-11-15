@@ -98,6 +98,15 @@ func RegisterGroupRoutes(router *gin.Engine, outputPath string, authMiddleware g
 		if relPath == "" {
 			relPath = "all.yaml"
 		}
+		// 防路径穿越：gin 的 *filepath 参数已做过 URL 解码，%2e%2e%2f 会变成 ../，
+		// filepath.Join 会把它折叠到上级目录，从而读到 output 之外的文件。
+		// 这里用 Clean 归一化后拒绝任何仍能逃出组目录的写法。
+		relPath = filepath.Clean(relPath)
+		if relPath == "." || filepath.IsAbs(relPath) ||
+			strings.HasPrefix(relPath, ".."+string(os.PathSeparator)) || relPath == ".." {
+			c.String(http.StatusBadRequest, "文件路径非法")
+			return
+		}
 
 		targetFile := filepath.Join(outputPath, "groups", groupName, relPath)
 		if _, err := os.Stat(targetFile); os.IsNotExist(err) {

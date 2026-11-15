@@ -16,10 +16,24 @@ func SetupMihomoDNS() {
 	// 全局 IPv6 禁用控制
 	resolver.DisableIPv6 = !config.GlobalConfig.EnableIPv6
 
-	// 如果没有任何自定义 DNS，则直接返回
+	// 如果没有任何自定义 DNS，也要重建一个默认解析器。
+	// 原因：cleanupMihomo 会把 DefaultResolver / SystemResolver 置 nil，
+	// 这里若直接 return，下一轮检测起 mihomo 的所有解析路径都会拿到 nil，
+	// LookupIPv4WithResolver 会退到 SystemResolver（同样为 nil）而失败。
+	// 因此「无自定义 DNS」分支必须显式重建默认解析器，而不是什么都不做。
 	hasCustom := len(config.GlobalConfig.NameServer) > 0 || len(config.GlobalConfig.ProxyServerNameserver) > 0 || len(config.GlobalConfig.ProxyServerNameserverPolicy) > 0
 
 	if !hasCustom {
+		cfg := dns.Config{IPv6: config.GlobalConfig.EnableIPv6}
+		defaults := []string{"114.114.114.114", "223.5.5.5", "8.8.8.8", "1.0.0.1", "1.1.8.8"}
+		if parsedDefaults, err := dns.ParseNameServer(defaults); err == nil {
+			cfg.Default = parsedDefaults
+		}
+		fallback := dns.NewResolver(cfg)
+		resolver.DefaultResolver = fallback.Resolver
+		resolver.SystemResolver = fallback.Resolver
+		resolver.ProxyServerHostResolver = fallback.Resolver
+		resolver.DirectHostResolver = fallback.Resolver
 		return
 	}
 

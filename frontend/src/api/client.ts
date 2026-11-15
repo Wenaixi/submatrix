@@ -21,6 +21,14 @@ export function setApiKey(key: string) {
   localStorage.setItem("scp_api_key", key);
 }
 
+// onUnauthorized 是全局 401 回调：任何 API 请求遇到鉴权失败都会触发。
+// 此前只有 App.loadData 会弹密钥框，其它视图（设置、分组、日志）只 toast 一句
+// 「UNAUTHORIZED」，用户不知道该去哪改密钥。把处理收拢到一处。
+let onUnauthorized: (() => void) | null = null;
+export function setUnauthorizedHandler(fn: (() => void) | null) {
+  onUnauthorized = fn;
+}
+
 export async function apiRequest<T = any>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = getApiKey();
   const headers = new Headers(options.headers || {});
@@ -41,6 +49,8 @@ export async function apiRequest<T = any>(endpoint: string, options: RequestInit
 
   const res = await fetch(url, { ...options, headers });
   if (res.status === 401) {
+    // 交给全局回调弹密钥框，同时仍抛错让调用方可以中断自己的后续逻辑
+    if (onUnauthorized) onUnauthorized();
     throw new Error("UNAUTHORIZED");
   }
   if (!res.ok) {
