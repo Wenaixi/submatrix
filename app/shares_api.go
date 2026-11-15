@@ -177,7 +177,16 @@ func (app *App) shareStatsHandler(c *gin.Context) {
 // ---------- 工具：组产物文件清单 ----------
 
 // listGroupFiles 返回某组产物目录下实际存在的文件。
+// listGroupFiles 列出某组组产物目录下、允许分享的文件。
+//
+// 目前没有调用方（保留给未来「创建分享时自动列出可选文件」的功能）。
+// groupName 参与路径拼接，这里仍校验字符集：createShareHandler 在
+// 「未配置任何分组」时会放行任意组名（默认组兜底），若将来有人接上这个函数
+// 而没校验，形如 ../../ 的组名会让 filepath.Join 折叠出 output 目录之外。
 func listGroupFiles(groupName string) []string {
+	if groupName == "" || !groupNamePattern.MatchString(groupName) {
+		return nil
+	}
 	dir := filepath.Join(outputDir(), "groups", groupName)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
