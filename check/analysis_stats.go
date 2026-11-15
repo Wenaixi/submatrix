@@ -276,7 +276,13 @@ func (pc *ProxyChecker) GenerateAnalysisReport() {
 	// 	sortedURLs = append(sortedURLs, u)
 	// }
 
-	// 从 SubStats 获取所有订阅 URL，包含成功率为 0 的订阅
+	// 从 SubStats 获取所有订阅 URL，包含成功率为 0 的订阅。
+	//
+	// 这里不加 SubStatsMutex：调用链路保证此时没有并发写者——
+	// GenerateAnalysisReport 在 run() 的流水线全部结束（wg.Wait + 收敛等待）
+	// 之后才被调用，Job.Close 的写入早已停止；WriteGlobalAnalysisReport
+	// 由 app 层在全部组检测完成后调用，同理。
+	// 若将来把统计逻辑挪到并发区，必须补锁。
 	sortedURLs := make([]string, 0, len(proxyutils.SubStats))
 	for u := range proxyutils.SubStats {
 		sortedURLs = append(sortedURLs, u)
@@ -343,6 +349,11 @@ func ResetGlobalSubAnalysis() {
 }
 
 // mergeSubAnalysis 把一组的订阅源统计并入全局，同 URL 取较大者。
+//
+// 所有权约定：本函数把 local 中的 *AnalysisStats 指针直接交给全局单例，
+// 调用方在此之后**不得再修改** local 里的对象（否则全局报告会静默变异）。
+// 当前唯一调用点 GenerateAnalysisReport 在 merge 之后立即返回，符合该约定。
+// 若将来需要在 merge 之后继续加工本组统计，必须先深拷贝一份再改。
 func mergeSubAnalysis(local map[string]*AnalysisStats) {
 	globalSubAnalysisMu.Lock()
 	defer globalSubAnalysisMu.Unlock()
@@ -390,7 +401,12 @@ func WriteGlobalAnalysisReport(totalPulled int) {
 	globalAnalysis := newAnalysisStats()
 	for _, k := range keys {
 		n := nodes[k]
-		applyNodeToStats(globalAnalysis, n.Name, n.Type, n.Speed, speedON)
+		// 这里传 speedON=true 而不是包级 speedON：
+		// 包级 speedON 只反映「最后一组」的 check-speed 开关（每组覆盖），
+		// 各组配置不同时会把前面组已测出的速度全部丢弃。
+		// applyNodeToStats 内部还会判 speed > 0，所以「没测速的组」其节点
+		// Speed 为 0，自然不会污染平均速度——按数据判定比按配置判定更准。
+		applyNodeToStats(globalAnalysis, n.Name, n.Type, n.Speed, true)
 	}
 	// 不变式兜底：地区分布之和必须等于节点总数。
 	// 差 2 的历史成因尚未完全定位（疑与某些多码点 emoji 的码点边界有关），
@@ -987,8 +1003,10 @@ func checkSubsSuccessRate(subs map[string]*AnalysisStats, sortedURLs []string) {
 			protoStr = "[" + strings.Join(protoParts, "; ") + "]"
 		}
 
-		// 格式化行：- URL # 46.667% (7/15) ; vless: 8
-		line := "  - " + u + " # " + strconv.FormatFloat(rate*100, 'f', 4, 64) + "% (" + strconv.Itoa(pStat.Success) + "/" + strconv.Itoa(pStat.Total) + ")" + protoStr + "\n"
+		// 格式化行：- "URL" # 46.667% (7/15) ; vless: 8
+		// URL 必须 Quote：订阅地址可能带 #（组间引用常用 /group/x/all.yaml#tag），
+		// YAML 会把裸写的 # 之后当成注释，导致该行被截断（与 subs-analysis.yaml 同源问题）。
+		line := "  - " + strconv.Quote(u) + " # " + strconv.FormatFloat(rate*100, 'f', 4, 64) + "% (" + strconv.Itoa(pStat.Success) + "/" + strconv.Itoa(pStat.Total) + ")" + protoStr + "\n"
 
 		// 分类逻辑
 		switch {

@@ -67,6 +67,14 @@ var (
 	progressWeight ProgressWeight
 )
 
+// 节点名清洗用的正则。原实现在 rename 的热路径里逐节点 regexp.MustCompile，
+// 上千节点规模下纯属浪费（编译一次约几微秒 × N）。这里预编译一次复用。
+var (
+	reStripSpeedTag = regexp.MustCompile(`\s*\|(?:\s*[\d.]+[KM]B/s)`)
+	reStripMediaTag = regexp.MustCompile(
+		`\s*\|(?:NF|D\+|GPT[⁺]?|CP[⁻]?|GM[⁺]?[ˀ]?(?:-[A-Z]{2})?|X|YT[⁻]?(?:-[A-Z]{2}[⁻]?)?|TK[⁻]?(?:-[^|]+)?|\d+%)`)
+)
+
 const MediaCheckMaxRetries = 3
 
 // Result 存储节点检测结果
@@ -971,8 +979,13 @@ func (pc *ProxyChecker) runSpeedStage(ctx context.Context, cancel context.Cancel
 					})
 				}
 
-				// 流转
-				pc.mediaChan <- job
+				// 流转：与 alive 阶段保持一致，用 select 响应取消。
+				// 裸发送在媒体闸门被 NetGuard 长期压制时会卡住发送方，
+				// 导致本轮收尾被无谓延迟。
+				select {
+				case pc.mediaChan <- job:
+				case <-ctx.Done():
+				}
 			}
 		})
 	}
@@ -1343,7 +1356,7 @@ func (pc *ProxyChecker) updateProxyName(res *Result, httpClient *ProxyClient, sp
 	var tags []string
 	// 速度标签
 	if pc.grp.CheckSpeed && speed > 0 {
-		name = regexp.MustCompile(`\s*\|(?:\s*[\d.]+[KM]B/s)`).ReplaceAllString(name, "")
+		name = reStripSpeedTag.ReplaceAllString(name, "")
 		var speedStr string
 		if speed < 100 {
 			speedStr = strconv.Itoa(speed) + "KB/s"
@@ -1356,9 +1369,7 @@ func (pc *ProxyChecker) updateProxyName(res *Result, httpClient *ProxyClient, sp
 
 	if pc.grp.MediaCheck {
 		// 移除旧标签
-		name = regexp.MustCompile(
-			`\s*\|(?:NF|D\+|GPT[⁺]?|CP[⁻]?|GM[⁺]?[ˀ]?(?:-[A-Z]{2})?|X|YT[⁻]?(?:-[A-Z]{2}[⁻]?)?|TK[⁻]?(?:-[^|]+)?|\d+%)`).
-			ReplaceAllString(name, "")
+		name = reStripMediaTag.ReplaceAllString(name, "")
 	}
 
 	// 平台标签（按用户配置顺序）

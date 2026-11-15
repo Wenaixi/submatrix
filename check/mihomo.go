@@ -39,12 +39,6 @@ func SetupMihomoDNS() {
 		IPv6: config.GlobalConfig.EnableIPv6,
 	}
 
-	// 提前注入兜底 Resolver (注意：NewResolver 返回的是 Resolvers，取其主 .Resolver)
-	fallbackResolvers := dns.NewResolver(dns.Config{IPv6: cfg.IPv6})
-	resolver.DefaultResolver = fallbackResolvers.Resolver
-	resolver.SystemResolver = fallbackResolvers.Resolver
-	resolver.ProxyServerHostResolver = fallbackResolvers.Resolver
-
 	// 1. 固化 DefaultNameserver (兜底解析 DoH 等基础域名)
 	defaults := []string{"114.114.114.114", "223.5.5.5", "8.8.8.8", "1.0.0.1", "1.1.8.8"}
 
@@ -52,6 +46,9 @@ func SetupMihomoDNS() {
 		cfg.Default = parsedDefaults
 	}
 
+	// 用一个 main 为空的 resolver 注入 DefaultResolver，随后立刻被下面这个
+	// （带 Default 兜底的）覆盖——纯属无意义的两步。且空 main 的解析器
+	// 一旦真被用到只会返回错误，比没有兜底更危险。直接建正确的那个。
 	bootstrapResolvers := dns.NewResolver(cfg)
 	resolver.DefaultResolver = bootstrapResolvers.Resolver
 	resolver.SystemResolver = bootstrapResolvers.Resolver
