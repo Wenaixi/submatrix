@@ -437,9 +437,20 @@ func SaveGroup(grp config.ResolvedGroupConfig, results []check.Result, historyPo
 // writeGroupFile 落盘单个组文件并检查写入结果。
 // 原先一律 `_ = os.WriteFile`，磁盘满/权限不足时静默失败，日志却照打「已落盘」，
 // 对外长期提供陈旧产物且无法定位。返回是否成功，供调用方决定是否打印成功日志。
+//
+// 用「写临时文件 + rename」而不是直接写目标路径：
+// 组产物是客户端反复拉取的订阅文件，直接覆盖时若进程在写一半被杀
+// （容器重启、OOM），留下的是半截 YAML，客户端会解析失败。
+// rename 在同一文件系统内是原子的，保证要么旧版完整、要么新版完整。
 func writeGroupFile(path string, data []byte) bool {
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
 		slog.Error("组产物写入失败", "path", path, "err", err)
+		return false
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		slog.Error("组产物重命名失败", "path", path, "err", err)
+		_ = os.Remove(tmp)
 		return false
 	}
 	return true
