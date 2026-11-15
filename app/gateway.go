@@ -100,15 +100,19 @@ func RegisterGroupRoutes(router *gin.Engine, outputPath string, authMiddleware g
 		}
 		// 防路径穿越：gin 的 *filepath 参数已做过 URL 解码，%2e%2e%2f 会变成 ../，
 		// filepath.Join 会把它折叠到上级目录，从而读到 output 之外的文件。
-		// 这里用 Clean 归一化后拒绝任何仍能逃出组目录的写法。
-		relPath = filepath.Clean(relPath)
-		if relPath == "." || filepath.IsAbs(relPath) ||
-			strings.HasPrefix(relPath, ".."+string(os.PathSeparator)) || relPath == ".." {
+		//
+		// 判据用 filepath.Rel 而不是「前缀比较 + os.PathSeparator 字面量」：
+		// 后者依赖分隔符写法，未来若混入正反斜杠或平台差异就可能漏判；
+		// Rel 直接回答「目标相对组目录往哪走」，返回值以 .. 开头或为绝对路径即拒绝。
+		groupDir := filepath.Join(outputPath, "groups", groupName)
+		rel, relErr := filepath.Rel(groupDir, filepath.Join(groupDir, relPath))
+		if relErr != nil || rel == "." || filepath.IsAbs(rel) ||
+			rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 			c.String(http.StatusBadRequest, "文件路径非法")
 			return
 		}
 
-		targetFile := filepath.Join(outputPath, "groups", groupName, relPath)
+		targetFile := filepath.Join(groupDir, relPath)
 		if _, err := os.Stat(targetFile); os.IsNotExist(err) {
 			c.String(http.StatusNotFound, "组订阅文件不存在")
 			return

@@ -403,8 +403,31 @@ func WriteGlobalAnalysisReport(totalPulled int) {
 		}
 		if diff := sum - globalAnalysis.Total; diff != 0 {
 			slog.Error("地区统计不一致，差额计入 Unknown", "total", globalAnalysis.Total, "countries_sum", sum, "diff", diff)
-			adj := globalAnalysis.Total - sum
-			globalAnalysis.Countries["Unknown"] += adj
+			// 双向修正：多计时从 Unknown 扣（不足则从最大地区扣），少计时补进 Unknown。
+			// 只在上限方向补、超计方向删键的做法会让 sum 依然对不上，
+			// 前端看到的仍是错数字，只是把 bug 藏进了日志。
+			if diff > 0 {
+				// sum 偏大：优先从 Unknown 扣，不够再从当前最大分项扣
+				remain := diff
+				if cur := globalAnalysis.Countries["Unknown"]; cur > 0 {
+					cut := min(cur, remain)
+					globalAnalysis.Countries["Unknown"] = cur - cut
+					remain -= cut
+				}
+				if remain > 0 {
+					topKey, topVal := "", 0
+					for k, v := range globalAnalysis.Countries {
+						if k != "Unknown" && v > topVal {
+							topKey, topVal = k, v
+						}
+					}
+					if topKey != "" {
+						globalAnalysis.Countries[topKey] -= min(topVal, remain)
+					}
+				}
+			} else {
+				globalAnalysis.Countries["Unknown"] += -diff
+			}
 			if globalAnalysis.Countries["Unknown"] <= 0 {
 				delete(globalAnalysis.Countries, "Unknown")
 			}

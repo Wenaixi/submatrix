@@ -558,6 +558,18 @@ func (pc *ProxyChecker) run(proxies []map[string]any) ([]Result, []map[string]an
 		}
 	}()
 
+	// 在启动任何阶段之前创建 resultChan：
+	// distributeJobs 的两条直通路径（skipped 节点、组关闭测活）会直接往
+	// pc.resultChan 发送，而它与 runMediaStageAndCollect 是并发启动的。
+	// 若分配器先跑到直通分支而 resultChan 尚未创建，向 nil channel 发送会
+	// 永久阻塞（不 panic、不打日志），整个检测就此挂死。
+	resultLength := pc.mediaConcurrent
+	// 判据必须是 > 0：SuccessLimit 为负数时会 make(chan, 负数) 直接 panic。
+	if pc.grp.SuccessLimit > 0 {
+		resultLength = int(pc.grp.SuccessLimit)
+	}
+	pc.resultChan = make(chan Result, resultLength)
+
 	// 启动流水线阶段
 	go pc.distributeJobs(proxies, ctx)
 	go pc.runAliveStage(ctx, geoDB)
@@ -973,14 +985,9 @@ func (pc *ProxyChecker) runSpeedStage(ctx context.Context, cancel context.Cancel
 // 流媒体检测 + 收集结果
 func (pc *ProxyChecker) runMediaStageAndCollect(db *maxminddb.Reader, ctx context.Context, cancel context.CancelFunc) {
 	var wg sync.WaitGroup
-	resultLength := pc.mediaConcurrent
-	// 判据必须是 > 0：SuccessLimit 为负数时会 make(chan, 负数) 直接 panic，
-	// 且发生在阶段推进中途（数据未落盘）。配置层虽无负数，防御在这里。
-	if pc.grp.SuccessLimit > 0 {
-		resultLength = int(pc.grp.SuccessLimit)
-	}
-
-	pc.resultChan = make(chan Result, resultLength)
+	// resultChan 已在 run() 启动各阶段之前创建（见那里的注释）：
+	// distributeJobs 的直通路径会直接向它发送，必须保证它在所有 goroutine
+	// 启动前就已就绪，否则会撞上 nil channel 永久阻塞。
 
 	// 设置成功数量限制
 	var stopOnce sync.Once

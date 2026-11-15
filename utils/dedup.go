@@ -206,30 +206,9 @@ func DeduplicateNodes(nodes []map[string]any) []map[string]any {
 			continue
 		}
 		seen[k] = struct{}{}
-		nameCount := make(map[string]int) // 用于记录每个 name 出现的次数
-
-		// 检查并处理重名问题
-		if nameRaw, ok := n["name"]; ok {
-			if name, ok := nameRaw.(string); ok {
-				if count, exists := nameCount[name]; exists {
-					// 发现重名，循环寻找一个可用的新名称（添加序号后缀，如 Name-1, Name-2）
-					var newName string
-					for i := count; ; i++ {
-						newName = fmt.Sprintf("%s-%d", name, i)
-						// 确保新名字也没有和别的节点撞名
-						if _, has := nameCount[newName]; !has {
-							nameCount[name] = i + 1 // 更新原名的起始搜索位
-							nameCount[newName] = 1  // 记录这个新名字
-							n["name"] = newName     // 覆盖节点原名
-							break
-						}
-					}
-				} else {
-					nameCount[name] = 1 // 首次出现
-				}
-			}
-		}
-
+		// 注意：这里曾有一段「重名 +序号」逻辑，但 nameCount 建在了循环体内，
+		// 每次迭代都是空 map，exists 恒为 false，整段是死代码。
+		// 重名处理由后续的 RenameDuplicateNodes 负责（它把 nameCount 建在循环外，是正确的）。
 		out = append(out, n)
 	}
 	return out

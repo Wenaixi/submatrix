@@ -34,7 +34,22 @@ func ExecuteCallback(successCount int) {
 		return
 	}
 	// 要求脚本真实路径必须位于 allowedRoot 之内（前缀判断 + 边界分隔符，防 /output-evil 绕过）
-	if absScript != absRoot && !strings.HasPrefix(absScript, absRoot+string(filepath.Separator)) {
+	//
+	// 必须用 EvalSymlinks 解析软链：filepath.Abs 只做词法绝对化，
+	// 若 output/ 下放一个指向 /etc/passwd 或任意脚本的软链，absScript 仍是
+	// <cwd>/output/evil.sh，前缀检查会通过，实际执行的却是软链指向的文件。
+	// 解析后再比，才能真正保证「跑的是输出目录里的文件」。
+	realScript, err := filepath.EvalSymlinks(absScript)
+	if err != nil {
+		slog.Error(fmt.Sprintf("回调脚本路径解析失败(软链): %s", callbackScript))
+		return
+	}
+	realRoot, err := filepath.EvalSymlinks(absRoot)
+	if err != nil {
+		// 输出目录尚未创建时退回词法根，行为与改动前一致
+		realRoot = absRoot
+	}
+	if realScript != realRoot && !strings.HasPrefix(realScript, realRoot+string(filepath.Separator)) {
 		slog.Error(fmt.Sprintf("回调脚本不在允许目录(输出目录)内，已拒绝执行: %s", callbackScript))
 		return
 	}

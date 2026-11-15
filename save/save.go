@@ -397,7 +397,12 @@ func SaveGroup(grp config.ResolvedGroupConfig, results []check.Result, historyPo
 	}
 
 	// 3. 落盘 all.yaml（已检测）与 mihomo.yaml（融合规则）
-	writeGroupYAML(grp, proxiesList)
+	if writeGroupYAML(grp, proxiesList) {
+		slog.Info("组产物已落盘", "组", grp.Name, "节点", len(proxiesList), "历史", len(historyPool))
+	} else {
+		// 主产物未写全（磁盘满/权限不足等），不打印成功日志误导排障
+		slog.Error("组产物落盘不完整", "组", grp.Name)
+	}
 
 	// 4. 落盘 all-raw.yaml（全量原始，含 skipped 未检测节点）
 	if len(rawList) > 0 {
@@ -431,7 +436,7 @@ func SaveGroup(grp config.ResolvedGroupConfig, results []check.Result, historyPo
 		}
 	}
 
-	slog.Info("组产物已落盘", "组", grp.Name, "节点", len(proxiesList), "历史", len(historyPool))
+	// 成功日志已在调用 writeGroupYAML 之后打印（据其返回值决定），此处不再重复
 }
 
 // writeGroupFile 落盘单个组文件并检查写入结果。
@@ -457,21 +462,24 @@ func writeGroupFile(path string, data []byte) bool {
 }
 
 // writeGroupYAML 把一组节点写入 groups/<name>/all.yaml 与 mihomo.yaml（按规则预设融合）。
-func writeGroupYAML(grp config.ResolvedGroupConfig, proxiesList []map[string]any) {
+// writeGroupYAML 把一组节点写入 groups/<name>/all.yaml 与 mihomo.yaml（按规则预设融合）。
+// 返回是否所有目标文件都写成功：调用方据此决定是否打印「已落盘」，
+// 否则磁盘满/权限不足时日志仍报成功，正是 writeGroupFile 想解决的问题。
+func writeGroupYAML(grp config.ResolvedGroupConfig, proxiesList []map[string]any) bool {
 	if !groupNamePattern.MatchString(grp.Name) {
 		slog.Error("组名含非法字符，拒绝落盘（防路径穿越）", "组名", grp.Name)
-		return
+		return false
 	}
 	saver, err := method.NewLocalSaver()
 	if err != nil {
 		slog.Error("获取保存目录失败", "err", err)
-		return
+		return false
 	}
 
 	groupDir := filepath.Join(saver.OutputPath, "groups", grp.Name)
 	if err := os.MkdirAll(groupDir, 0755); err != nil {
 		slog.Error("创建组输出目录失败", "dir", groupDir, "err", err)
-		return
+		return false
 	}
 
 	// 节点上限已在 SaveGroup 截取（本函数为内部落盘点，不再重复截取）
@@ -479,27 +487,26 @@ func writeGroupYAML(grp config.ResolvedGroupConfig, proxiesList []map[string]any
 	allYamlData, err := yaml.Marshal(map[string]any{"proxies": proxiesList})
 	if err != nil {
 		slog.Error("序列化组节点失败，跳过写入", "组", grp.Name, "err", err)
-		return
+		return false
 	}
-	writeGroupFile(filepath.Join(groupDir, "all.yaml"), allYamlData)
+	allOK := writeGroupFile(filepath.Join(groupDir, "all.yaml"), allYamlData)
 
 	if grp.RulePreset == config.RulePresetDirectPure {
-		writeGroupFile(filepath.Join(groupDir, "mihomo.yaml"), allYamlData)
-		return
+		return writeGroupFile(filepath.Join(groupDir, "mihomo.yaml"), allYamlData) && allOK
 	}
 
 	mihomoData, err := buildGroupMihomoYAML(grp, proxiesList)
 	switch {
 	case err == nil && len(mihomoData) > 0:
-		writeGroupFile(filepath.Join(groupDir, "mihomo.yaml"), mihomoData)
+		return writeGroupFile(filepath.Join(groupDir, "mihomo.yaml"), mihomoData) && allOK
 	case err != nil:
 		// 模板加载/解析失败：必须记录并降级，否则客户端拿不到 mihomo.yaml 而日志毫无线索
 		slog.Warn("合并组规则模板失败，降级保存纯节点列表",
 			"group", grp.Name, "preset", grp.RulePreset, "err", err)
-		writeGroupFile(filepath.Join(groupDir, "mihomo.yaml"), allYamlData)
+		return writeGroupFile(filepath.Join(groupDir, "mihomo.yaml"), allYamlData) && allOK
 	default:
 		// err == nil 且模板为空：仅纯节点模式（direct_pure 已提前 return），视为异常但可降级
 		slog.Warn("规则模板为空，降级保存纯节点列表", "group", grp.Name, "preset", grp.RulePreset)
-		writeGroupFile(filepath.Join(groupDir, "mihomo.yaml"), allYamlData)
+		return writeGroupFile(filepath.Join(groupDir, "mihomo.yaml"), allYamlData) && allOK
 	}
 }

@@ -238,24 +238,28 @@ func (app *App) pollConfigFile(ctx context.Context) {
 // ReStartSubStore 这类秒级阻塞调用，若持锁执行会把轮询 tick 与 inotify 事件
 // 全部堵死，期间配置的后续修改只能排队。因此副作用在锁外执行，
 // 用 reloading 的 CAS 保证「同一时刻只有一次重载在跑」。
-func (app *App) tryReloadByModTime() {
+//
+// 返回值表示「本次是否真正完成了重载」：调用方（applyPendingReload）
+// 据此决定是否可以清掉 pendingReload。抢到 reloading 却中途放弃时返回 false，
+// 让调用方保持 pending，下一轮再试。
+func (app *App) tryReloadByModTime() bool {
 	app.configModMu.Lock()
 	info, err := os.Stat(app.configPath)
 	if err != nil {
 		// 文件暂时不可读（编辑器替换中 / 被删除），跳过本轮，下次 tick 再试
 		app.configModMu.Unlock()
-		return
+		return false
 	}
 	if !info.ModTime().After(app.lastConfigMod) {
 		app.configModMu.Unlock()
-		return
+		return false
 	}
 	app.lastConfigMod = info.ModTime()
 	app.configModMu.Unlock()
 
 	// 已有一轮重载在执行，本次跳过：正在跑的那轮会读到同一个 mtime 的文件
 	if !app.reloading.CompareAndSwap(false, true) {
-		return
+		return false
 	}
 	defer app.reloading.Store(false)
 
@@ -266,37 +270,61 @@ func (app *App) tryReloadByModTime() {
 	if app.checking.Load() && !app.waitForIdle(10*time.Second) {
 		slog.Info("检测仍在进行，配置变更将在本轮检测结束后应用")
 		app.pendingReload.Store(true)
-		return
+		return false
+	}
+
+	// Shutdown 已启动时不再应用变更：此时 Sub-Store/cron 可能已被停止，
+	// 再触发 onConfigChange 会去重启已经关闭的服务。
+	select {
+	case <-app.ctx.Done():
+		slog.Debug("应用已关闭，跳过配置重载")
+		return false
+	default:
 	}
 
 	slog.Info("配置文件发生变化，正在重新加载", "mtime", info.ModTime().Format("15:04:05"))
 	app.onConfigChange()
+	return true
 }
 
 // waitForIdle 等待当前检测结束，返回是否在超时前进入空闲。
+// 同时监听 ctx：Shutdown 期间不该继续空等 10 秒。
 func (app *App) waitForIdle(timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if !app.checking.Load() {
 			return true
 		}
-		time.Sleep(50 * time.Millisecond)
+		select {
+		case <-app.ctx.Done():
+			return false
+		case <-time.After(50 * time.Millisecond):
+		}
 	}
 	return !app.checking.Load()
 }
 
 // applyPendingReload 在检测结束后应用被延后的配置变更。
 // 由 triggerCheck 的收尾阶段调用，保证「每轮检测只跑在同一份配置上」。
+//
+// 不在入口就清掉 pendingReload：原子 CAS 只负责「抢执行权」，
+// 若抢到之后因 reloading 冲突 / stat 失败中途返回，配置变更就永久丢失了。
+// 改为「真正执行完 onConfigChange 之后才清」，中途失败则让 pending 保持为 true，
+// 下一轮 tick 会再次尝试。
 func (app *App) applyPendingReload() {
-	if !app.pendingReload.CompareAndSwap(true, false) {
+	if !app.pendingReload.Load() {
 		return
 	}
 	slog.Info("上一轮检测已结束，开始应用延后的配置变更")
-	// 重新 stat 一次，取到检测期间的最新 mtime
+	// 重新 stat 一次，取到检测期间的最新 mtime。
+	// 清零后任何 mtime 都比较「更新」，确保 pending 期间的改动不会被漏掉。
 	app.configModMu.Lock()
 	app.lastConfigMod = time.Time{}
 	app.configModMu.Unlock()
-	app.tryReloadByModTime()
+
+	if app.tryReloadByModTime() {
+		app.pendingReload.Store(false)
+	}
 }
 
 // onConfigChange 配置文件变化时的统一响应逻辑，由 inotify 事件或轮询共同调用。
