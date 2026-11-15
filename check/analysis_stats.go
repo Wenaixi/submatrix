@@ -500,7 +500,9 @@ func saveDetailedAnalysis(global *AnalysisStats, subs map[string]*AnalysisStats,
 
 		if st != nil {
 			sb.WriteString("  - url: ")
-			sb.WriteString(u)
+			// URL 必须 Quote：订阅地址可能带 #（组间引用常用 /group/x/all.yaml#tag），
+			// YAML 会把裸写的 # 之后当成注释，导致该行截断。
+			sb.WriteString(strconv.Quote(u))
 			sb.WriteString("\n")
 			sb.WriteString("    stats: { rate: ")
 			sb.WriteString(strconv.FormatFloat(rate*100, 'f', 4, 64))
@@ -544,7 +546,7 @@ func saveDetailedAnalysis(global *AnalysisStats, subs map[string]*AnalysisStats,
 			sb.WriteString("]\n")
 		} else {
 			sbBad.WriteString("  - url: ")
-			sbBad.WriteString(u)
+			sbBad.WriteString(strconv.Quote(u))
 			sbBad.WriteString("\n")
 			sbBad.WriteString("    stats: { rate: ")
 			sbBad.WriteString(strconv.FormatFloat(rate*100, 'f', 4, 64))
@@ -566,10 +568,14 @@ func saveDetailedAnalysis(global *AnalysisStats, subs map[string]*AnalysisStats,
 				sbBad.WriteString("\n")
 			}
 			// 写入明确的失效原因
+			// 必须用 strconv.Quote：ErrMsg 常是 Go 标准库的错误文本，
+			// 形如 `Get "https://...": EOF`，本身自带双引号。
+			// 手工用 "..." 包裹时内部引号不转义，YAML 会在此处截断成非法结构，
+			// 导致整份报告解析失败、接口退化成只返回原始字符串（前端统计全 0）。
 			if pStat.ErrMsg != "" {
-				sbBad.WriteString("    error: \"")
-				sbBad.WriteString(pStat.ErrMsg)
-				sbBad.WriteString("\"\n")
+				sbBad.WriteString("    error: ")
+				sbBad.WriteString(strconv.Quote(pStat.ErrMsg))
+				sbBad.WriteString("\n")
 			}
 		}
 	}

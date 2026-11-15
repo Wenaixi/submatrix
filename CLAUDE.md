@@ -407,3 +407,34 @@ docker run -d --name submatrix-test --restart always -p 8199:8199 `
 | 修复前（只 mtf） | 5 | 19 |
 | 修复后（全合并） | 27 | 213（4 组合计 402，去重率 47%）|
 
+## 15. 报告 YAML 手工拼接被引号截断，前端统计全 0（2026-11-16 修复）
+
+### 症状
+WebUI「节点质检分析报告」页面所有卡片显示 0：探测节点总数 0、可用节点总数 0、
+存活率 0.00%、覆盖 0 个地区、暂无订阅源数据。但顶部的「上次检测时间」是正确的。
+
+### 根因（两层）
+1. `stats/subs-analysis.yaml` 里 `error:` 字段用手工拼引号：
+   `WriteString("    error: \"") + WriteString(ErrMsg) + WriteString("\"")`。
+   而 `ErrMsg` 常是 Go 标准库错误文本，形如 `Get "https://...": EOF`，**自带双引号**。
+   YAML 读到内层第二个 `"` 就认为字符串结束，后面内容成为非法结构，**整份文件解析失败**。
+2. `getAnalysisReport` 解析失败时走兜底分支，只返回 `{"report": 原文}`，
+   没有 `report_data`。前端只认 `report_data`，因此所有卡片空白。
+
+### 关键判据
+**「上次检测时间对、其它全 0」= 接口通了但 report_data 缺失**，不是检测失败。
+直接 curl `/api/analysis-report` 看有没有 `report_data` 键即可确诊。
+
+### 修法
+YAML 里所有用户/系统来源的字符串一律 `strconv.Quote`，不要手工包引号：
+- `error:` 字段（`pStat.ErrMsg`、`r.ErrMsg`）
+- `url:` 字段——**URL 里的 `#` 在 YAML 中是注释起始符**，
+  组间引用常用的 `/group/x/all.yaml#tag` 不 Quote 会被截断。
+- 已有的 `buildRemoteSubsYAML` 早就正确用了 `strconv.Quote`，说明正确做法一直清楚，
+  只是 `saveDetailedAnalysis` 里漏改。
+
+### 验证手法
+改完统计输出后，**不能只看文件内容像不像**（肉眼看着是合法 YAML 也可能解析失败）。
+必须真的跑一次 `goccy/go-yaml` 的 `Unmarshal`，或 curl 接口确认返回体含 `report_data`。
+
+
