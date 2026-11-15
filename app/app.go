@@ -47,6 +47,9 @@ type App struct {
 	// 与 configModMu 分离：锁只保护 mtime 比较，副作用（SubStore 重启等秒级操作）
 	// 在锁外执行，避免堵死轮询 tick。
 	reloading atomic.Bool
+	// pendingReload 标记「检测期间收到过配置变更，需等本轮结束后应用」。
+	// 避免检测中途读到半新半旧的全局配置。
+	pendingReload atomic.Bool
 	// debounceTimer 是 inotify 事件的防抖定时器（避免编辑器写临时文件产生两次事件）。
 	// 提升为字段是为了让 Shutdown 能 Stop 它：否则关闭窗口内回调仍可能触发
 	// onConfigChange → setTimer → close(app.done)，造成二次关闭 panic。
@@ -409,6 +412,10 @@ func (app *App) triggerCheck() {
 	// resolver.DefaultResolver（cleanupMihomo 会把它置 nil），产生数据竞争。
 	// 由函数开头的 defer app.checking.Store(false) 统一负责解锁。
 	releaseMemory()
+
+	// 本轮检测已彻底结束（内存也回收完），此时才应用检测期间累计的配置变更，
+	// 保证下一轮检测跑在完整的新配置上。
+	app.applyPendingReload()
 }
 
 // checkProxies 执行代理检测

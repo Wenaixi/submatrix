@@ -16,24 +16,21 @@ func SetupMihomoDNS() {
 	// 全局 IPv6 禁用控制
 	resolver.DisableIPv6 = !config.GlobalConfig.EnableIPv6
 
-	// 如果没有任何自定义 DNS，也要重建一个默认解析器。
-	// 原因：cleanupMihomo 会把 DefaultResolver / SystemResolver 置 nil，
-	// 这里若直接 return，下一轮检测起 mihomo 的所有解析路径都会拿到 nil，
-	// LookupIPv4WithResolver 会退到 SystemResolver（同样为 nil）而失败。
-	// 因此「无自定义 DNS」分支必须显式重建默认解析器，而不是什么都不做。
+	// 如果没有任何自定义 DNS，保持默认解析器不动。
+	//
+	// 这里曾错误地尝试「重建一个兜底解析器」，结果实测把检测打成全线 0 可用：
+	// 用 dns.NewResolver(cfg) 覆盖 SystemResolver 会替换掉 mihomo 在 dns 包
+	// init() 里构造的 systemClient（见 mihomo/dns/system.go），
+	// 在受限网络下（容器只放通特定 DNS）会导致所有解析秒级失败，
+	// 表现为「节点全部 0 可用、整组检测耗时不到 1 秒」。
+	//
+	// 正确认知：cleanupMihomo 只把 DefaultResolver 置 nil，SystemResolver 始终
+	// 由 mihomo 的 init() 保证非 nil；而 resolver 各 Lookup/Resolve 入口在
+	// DefaultResolver 为 nil 时会自动回退到 SystemResolver。因此无自定义 DNS 时
+	// 不需要任何重建动作。
 	hasCustom := len(config.GlobalConfig.NameServer) > 0 || len(config.GlobalConfig.ProxyServerNameserver) > 0 || len(config.GlobalConfig.ProxyServerNameserverPolicy) > 0
 
 	if !hasCustom {
-		cfg := dns.Config{IPv6: config.GlobalConfig.EnableIPv6}
-		defaults := []string{"114.114.114.114", "223.5.5.5", "8.8.8.8", "1.0.0.1", "1.1.8.8"}
-		if parsedDefaults, err := dns.ParseNameServer(defaults); err == nil {
-			cfg.Default = parsedDefaults
-		}
-		fallback := dns.NewResolver(cfg)
-		resolver.DefaultResolver = fallback.Resolver
-		resolver.SystemResolver = fallback.Resolver
-		resolver.ProxyServerHostResolver = fallback.Resolver
-		resolver.DirectHostResolver = fallback.Resolver
 		return
 	}
 

@@ -259,8 +259,44 @@ func (app *App) tryReloadByModTime() {
 	}
 	defer app.reloading.Store(false)
 
+	// 检测进行中时不要重载：loadConfig 是 `*config.GlobalConfig = newConfig` 的
+	// 逐字段整结构覆盖，正在跑的那轮检测会在中途读到「一半新一半旧」的配置
+	// （例如 URLs 已换成新订阅，超时还是旧值），且没有锁保护。
+	// 变更为「等检测空闲后再应用」，若超时未空闲则记入 pending 由下一轮 tick 重试。
+	if app.checking.Load() && !app.waitForIdle(10*time.Second) {
+		slog.Info("检测仍在进行，配置变更将在本轮检测结束后应用")
+		app.pendingReload.Store(true)
+		return
+	}
+
 	slog.Info("配置文件发生变化，正在重新加载", "mtime", info.ModTime().Format("15:04:05"))
 	app.onConfigChange()
+}
+
+// waitForIdle 等待当前检测结束，返回是否在超时前进入空闲。
+func (app *App) waitForIdle(timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if !app.checking.Load() {
+			return true
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return !app.checking.Load()
+}
+
+// applyPendingReload 在检测结束后应用被延后的配置变更。
+// 由 triggerCheck 的收尾阶段调用，保证「每轮检测只跑在同一份配置上」。
+func (app *App) applyPendingReload() {
+	if !app.pendingReload.CompareAndSwap(true, false) {
+		return
+	}
+	slog.Info("上一轮检测已结束，开始应用延后的配置变更")
+	// 重新 stat 一次，取到检测期间的最新 mtime
+	app.configModMu.Lock()
+	app.lastConfigMod = time.Time{}
+	app.configModMu.Unlock()
+	app.tryReloadByModTime()
 }
 
 // onConfigChange 配置文件变化时的统一响应逻辑，由 inotify 事件或轮询共同调用。
