@@ -370,3 +370,40 @@ docker run -d --name submatrix-test --restart always -p 8199:8199 `
 - 首尔 `subs-check` 的 token `d6ac01e7...` **已失效**（403 Forbidden 页面）
 - 但其域名 `study.small1999.sbs` 仍可用，用本机有效 token 访问返回完整订阅
 - 已把该域名加入 hneko 组，两个域名并行拉取
+
+## 14. 报告地区分布：单组覆盖 → 全组合并去重（2026-11-16 修复）
+
+### 症状
+`stats/subs-analysis.yaml` 里的 `global_analysis.geography_distribution` 只显示
+最后检测完的那一组。实测 mtf 最后一组跑完时报告只有 `SG 7 / KR 5 / TW 3 / US 3 / JP 1`，
+一共 19 个节点——正好是 mtf 单组的量，其余四组的地区完全看不到。
+
+### 根因
+- `GenerateAnalysisReport` 是 `ProxyChecker` 的方法，数据源是 `pc.results`，**只有本组**。
+- 它写的 `stats/subs-analysis.yaml` 是固定文件名，**每组的报告覆盖前一组**。
+- 于是磁盘上最终只剩最后一组的统计。这不是数据计算错误，是覆盖写导致的信息丢失。
+
+### 修法
+- 新增进程级全局集合 `globalAliveNodes`（map + mutex + 插入顺序表），
+  `ResetGlobalAliveNodes` 在每轮检测开始时清空。
+- 每 `CheckGroup` 结束后由 `CollectGroupAliveNodes(results)` 并入，
+  去重键用 `utils.GenerateProxyKey`（server + 端口 + 凭据 + SNI/Host 物理指纹）。
+- 所有组检测完后 `WriteGlobalAnalysisReport` 用全局去重重写报告。
+- 抽出 `applyNodeToStats`，让单组与全局共用同一套解析口径，避免两处正则分叉。
+
+### 去重语义（务必保持）
+- 同一物理节点被多个组引用 → 只算一次（free-a/free-b/all-in-one 共享订阅源，重复率约 47%）。
+- **同 IP 不同凭据 → 保留为不同节点**。`GenerateProxyKey` 含密码/UUID，
+  这是刻意的：不同账号限速/限流量独立，合并会少算真实可用节点。
+- 单测 `check/analysis_stats_test.go` 固化了这两条语义。
+
+### 验证手法（下次改统计时照做）
+**总和校验**：把地区分布各值相加，必须等于 `alive_count`。
+这次 213 = 213 才敢说统计正确；不等就说明有节点重复计入或静默丢失。
+
+### 实测对照
+| | 覆盖地区 | 去重可用节点 |
+|---|---|---|
+| 修复前（只 mtf） | 5 | 19 |
+| 修复后（全合并） | 27 | 213（4 组合计 402，去重率 47%）|
+
