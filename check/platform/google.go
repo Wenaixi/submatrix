@@ -32,6 +32,11 @@ func CheckAliveWithFallback(httpClient *http.Client, ctx context.Context) (bool,
 
 // checkGoogleEndpoint 使用 GET 方法检查 URL 的状态码，2xx 即视为成功。
 // statusCode 参数保留仅为兼容既有调用方签名，实际判定不依赖具体状态码。
+//
+// 为什么不用「严格等于 statusCode」：generate_204 端点本该返回 204，
+// 但有相当一部分代理会把 204 改写成 200 或其它 2xx，严格判定会让这些
+// 实际可用的节点全部被误判死亡。测活的目标是「这个节点能不能通」，
+// 不是「服务端行为是否规范」，所以用 2xx 宽容判定。
 func checkGoogleEndpoint(httpClient *http.Client, ctx context.Context, url string, statusCode int) (bool, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
