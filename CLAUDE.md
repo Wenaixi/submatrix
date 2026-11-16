@@ -512,5 +512,37 @@ subAnalysis 键数=24   sortedURLs 键数=24   交集=0
 - `sum(protocol_distribution) == alive_count`
 两条都过才证明「每个节点恰好被计入一次地区、一次协议」。
 
+## 17. 地区分布支持按组筛选（2026-11-17 新增）
+
+### 需求
+地区分布不再固定显示「所有组合并去重」，用户要能选一个组、只看它自己的节点。
+
+### 实现要点
+- `globalAliveNode` 增加 `Groups []string`，记录该物理节点被哪些组引用过。
+  `CollectGroupAliveNodes(results, groupName)` 在节点已存在时只追加组名、不重复计数。
+  这一步是必需的前提：原数据结构只有 `{Name, Type, Speed}`，拿不到组归属。
+- `WriteGlobalAnalysisReport` 在累加全局统计的同时，按 `Groups` 为每组各算一份
+  `AnalysisStats`，写进报告的新段 `per_group_geography`。
+- 前端 `AnalysisView` 顶部下拉：默认「全部组（合并去重）」，可选单个组；
+  切换后 4 维指标卡片、世界地图、地区列表、协议分布全部跟着切。
+
+### 口径（关键，勿混淆）
+```
+各组 alive 之和  >  全局去重后的 alive_count
+```
+因为同一节点可能被多个组引用（`all-in-one` 聚合 `free-a` + `free-b` 的产物）。
+实测：5 组之和 647 vs 全局去重 338，差值 309 正是共享节点。
+**这是设计如此**：每个组内部各自去重、组间不去重，才符合「这个组里有什么」的语义。
+
+若哪天发现各组之和等于全局数，反而说明组归属记录失效了，要查 `Groups` 是否没被写进去。
+
+### 校验方式
+`per_group_geography` 里每组须满足：
+```
+sum(该组 geography_distribution) == 该组 alive
+sum(该组 protocol_distribution) == 该组 alive
+```
+
+
 
 
