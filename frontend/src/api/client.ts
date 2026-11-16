@@ -233,6 +233,12 @@ export interface SubRankingItem {
   top_locations?: string[];
 }
 
+export interface PerGroupGeography {
+  alive?: number;
+  geography_distribution?: Record<string, number>;
+  protocol_distribution?: Record<string, number>;
+}
+
 export interface ReportData {
   summary?: string;
   check_info?: CheckInfo;
@@ -242,6 +248,9 @@ export interface ReportData {
     protocol_distribution?: Record<string, number>;
     quality_metrics?: Record<string, any>;
   };
+  // 每个组各自的统计，供前端下拉切换。同一节点可能被多个组引用，
+  // 因此各组 alive 之和会大于 global_analysis.alive_count。
+  per_group_geography?: Record<string, PerGroupGeography>;
   subs_ranking?: SubRankingItem[];
   subs_ranking_bad?: SubRankingItem[];
 }

@@ -43,17 +43,35 @@ export const AnalysisView: React.FC = () => {
   const checkInfo = rd?.check_info;
   const globalAnalysis = rd?.global_analysis;
 
+  // 组选择：'' 表示「全部组（合并去重）」，否则是具体组名
+  const [selectedGroup, setSelectedGroup] = useState<string>('');
+  const perGroup = rd?.per_group_geography || {};
+  const groupNames = Object.keys(perGroup).sort();
+
+  // 当前视图的数据源：选「全部」走 global_analysis，选具体组走 per_group_geography
+  const activeView = selectedGroup && perGroup[selectedGroup]
+    ? {
+        alive: perGroup[selectedGroup].alive || 0,
+        geography: perGroup[selectedGroup].geography_distribution || {},
+        protocol: perGroup[selectedGroup].protocol_distribution || {},
+      }
+    : {
+        alive: globalAnalysis?.alive_count || 0,
+        geography: globalAnalysis?.geography_distribution || {},
+        protocol: globalAnalysis?.protocol_distribution || {},
+      };
+
   // 节点总数与可用数
   const totalNodes = checkInfo?.check_count_raw || (checkInfo?.check_count ? parseInt(checkInfo.check_count) : 0);
-  const aliveNodes = globalAnalysis?.alive_count || 0;
+  const aliveNodes = activeView.alive;
   const aliveRate = totalNodes > 0 ? ((aliveNodes / totalNodes) * 100).toFixed(2) : '0.00';
 
   // 国家分布（降序排列）
-  const geoEntries = Object.entries(globalAnalysis?.geography_distribution || {})
+  const geoEntries = Object.entries(activeView.geography)
     .sort((a, b) => b[1] - a[1]);
 
   // 协议分布（降序排列）
-  const protoEntries = Object.entries(globalAnalysis?.protocol_distribution || {})
+  const protoEntries = Object.entries(activeView.protocol)
     .sort((a, b) => b[1] - a[1]);
 
   // 优选订阅源排行榜
@@ -176,8 +194,49 @@ export const AnalysisView: React.FC = () => {
         </div>
       </div>
 
+      {/* 组筛选：默认「全部组（合并去重）」，可选单个组查看各自的地区分布 */}
+      {groupNames.length > 0 && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          flexWrap: 'wrap',
+          padding: '12px 20px',
+          background: 'var(--surface-2)',
+          border: '1px solid var(--border)',
+        }}>
+          <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>查看范围</span>
+          <select
+            value={selectedGroup}
+            onChange={(e) => setSelectedGroup(e.target.value)}
+            style={{
+              padding: '6px 12px',
+              fontSize: '13px',
+              background: 'var(--surface-1)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--border)',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              minWidth: '180px',
+            }}
+          >
+            <option value="">全部组（合并去重 · {globalAnalysis?.alive_count || 0} 个节点）</option>
+            {groupNames.map((g) => (
+              <option key={g} value={g}>
+                {g}（{perGroup[g]?.alive || 0} 个节点）
+              </option>
+            ))}
+          </select>
+          <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+            {selectedGroup
+              ? `当前只统计 ${selectedGroup} 组内的节点；同一节点若被多个组引用，会在各组分别计入`
+              : '所有组的节点合并后按物理指纹去重，同一节点只计一次'}
+          </span>
+        </div>
+      )}
+
       {/* 全球节点真实雷达航线与地理拓扑地图 */}
-      <WorldMap distribution={globalAnalysis?.geography_distribution || {}} />
+      <WorldMap distribution={activeView.geography} />
 
       {/* 国家与协议分布双栏极简看板 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '16px' }}>

@@ -38,13 +38,27 @@ func TestCollectGroupAliveNodesDedup(t *testing.T) {
 		"sni":      "tw4.mtf.llc",
 	}
 
-	CollectGroupAliveNodes([]Result{{Proxy: nodeAPI}})
-	CollectGroupAliveNodes([]Result{{Proxy: nodeAPI2}})
-	CollectGroupAliveNodes([]Result{{Proxy: nodeOtherAcct}})
+	CollectGroupAliveNodes([]Result{{Proxy: nodeAPI}}, "free-a")
+	CollectGroupAliveNodes([]Result{{Proxy: nodeAPI2}}, "all-in-one")
+	CollectGroupAliveNodes([]Result{{Proxy: nodeOtherAcct}}, "free-b")
 
 	// 期望：第一个节点被去重成 1 条，加上不同账号 1 条 = 2 条
 	if got := GlobalAliveCount(); got != 2 {
 		t.Fatalf("全局去重节点数 = %d，期望 2（同节点跨组只算一次，不同账号各算一次）", got)
+	}
+
+	// 新增：组归属应记录两个组名（nodeAPI 与 nodeAPI2 是同一物理节点，
+	// 分别来自 free-a 与 all-in-one）
+	globalAliveMu.Lock()
+	var gotGroups []string
+	for _, n := range globalAliveNodes {
+		if len(n.Groups) > 0 && n.Name == "🇹🇼TW²_1|A" {
+			gotGroups = append(gotGroups, n.Groups...)
+		}
+	}
+	globalAliveMu.Unlock()
+	if len(gotGroups) != 2 || !containsStr(gotGroups, "free-a") || !containsStr(gotGroups, "all-in-one") {
+		t.Errorf("组归属记录错误: 期望 [free-a all-in-one]，实得 %v", gotGroups)
 	}
 
 	ResetGlobalAliveNodes()

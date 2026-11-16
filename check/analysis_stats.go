@@ -67,6 +67,10 @@ type globalAliveNode struct {
 	Name  string
 	Type  string
 	Speed int
+	// Groups 记录这个物理节点被哪些组引用过。
+	// 同一个节点可能同时出现在 free-a 与 all-in-one（后者聚合了前者产物），
+	// 有这个字段才能按组给出各自的地区分布。
+	Groups []string
 }
 
 // ResetGlobalAliveNodes 清空全局节点集合，每轮完整检测开始时调用一次。
@@ -78,7 +82,10 @@ func ResetGlobalAliveNodes() {
 }
 
 // CollectGroupAliveNodes 把某一组的可用节点并入全局集合（按物理指纹去重）。
-func CollectGroupAliveNodes(results []Result) {
+//
+// groupName 用于记录归属：节点首次出现时创建条目，之后被别的组再次引用时
+// 只把组名追加进 Groups，不重复计入节点总数。
+func CollectGroupAliveNodes(results []Result, groupName string) {
 	globalAliveMu.Lock()
 	defer globalAliveMu.Unlock()
 
@@ -90,14 +97,33 @@ func CollectGroupAliveNodes(results []Result) {
 		if key == "" {
 			continue
 		}
-		if _, exists := globalAliveNodes[key]; exists {
+		if existing, exists := globalAliveNodes[key]; exists {
+			// 节点已存在：只补充组归属，不重复计数
+			if groupName != "" && !containsStr(existing.Groups, groupName) {
+				existing.Groups = append(existing.Groups, groupName)
+				globalAliveNodes[key] = existing
+			}
 			continue
 		}
 		name, _ := r.Proxy["name"].(string)
 		pType, _ := r.Proxy["type"].(string)
-		globalAliveNodes[key] = globalAliveNode{Name: name, Type: pType, Speed: r.Speed}
+		node := globalAliveNode{Name: name, Type: pType, Speed: r.Speed}
+		if groupName != "" {
+			node.Groups = []string{groupName}
+		}
+		globalAliveNodes[key] = node
 		globalAliveOrder = append(globalAliveOrder, key)
 	}
+}
+
+// containsStr 判断字符串切片是否已包含目标值（组名数量很少，线性足够了）。
+func containsStr(list []string, target string) bool {
+	for _, s := range list {
+		if s == target {
+			return true
+		}
+	}
+	return false
 }
 
 // GlobalAliveCount 返回当前全局去重后的可用节点数。
@@ -322,8 +348,8 @@ func (pc *ProxyChecker) GenerateAnalysisReport() {
 
 	// 并保存订阅成功率统计并打印成功率过低日志
 	checkSubsSuccessRate(subAnalysis, sortedURLs)
-	// 保存深度分析报告
-	saveDetailedAnalysis(globalAnalysis, subAnalysis, sortedURLs)
+	// 保存深度分析报告（单组：不输出 per_group_geography，perGroup 传 nil）
+	saveDetailedAnalysis(globalAnalysis, subAnalysis, sortedURLs, 0, nil)
 
 	// 终端输出总结
 	logSummary(globalAnalysis)
@@ -425,6 +451,11 @@ func WriteGlobalAnalysisReport(totalPulled int) {
 	}
 
 	globalAnalysis := newAnalysisStats()
+	// 按组统计：每个组一份独立的 AnalysisStats。
+	// 注意口径：同一节点可能被多个组引用（如 all-in-one 聚合 free-a 的产物），
+	// 因此「各组之和」会大于「全组去重后的总数」——这是刻意的，
+	// 每个组视图内部各自去重，组间不去重，才符合「我想看这个组有什么」的直觉。
+	perGroup := make(map[string]*AnalysisStats)
 	for _, k := range keys {
 		n := nodes[k]
 		// 这里传 speedON=true 而不是包级 speedON：
@@ -433,6 +464,13 @@ func WriteGlobalAnalysisReport(totalPulled int) {
 		// applyNodeToStats 内部还会判 speed > 0，所以「没测速的组」其节点
 		// Speed 为 0，自然不会污染平均速度——按数据判定比按配置判定更准。
 		applyNodeToStats(globalAnalysis, n.Name, n.Type, n.Speed, true)
+
+		for _, g := range n.Groups {
+			if _, ok := perGroup[g]; !ok {
+				perGroup[g] = newAnalysisStats()
+			}
+			applyNodeToStats(perGroup[g], n.Name, n.Type, n.Speed, true)
+		}
 	}
 
 	// 逐节点自检只在总和确实不一致时才跑（正常情况零开销）：
@@ -462,9 +500,9 @@ func WriteGlobalAnalysisReport(totalPulled int) {
 		}
 	}
 	// 不变式兜底：地区分布之和必须等于节点总数。
-	// 差 2 的历史成因尚未完全定位（疑与某些多码点 emoji 的码点边界有关），
-	// 这里做最后一道保证：把差额计入 Unknown，让前端「地区之和」永远等于「可用节点数」，
-	// 避免用户看到一组对不上的数字。同时打 Error 日志保留线索。
+	// 历史成因（复合角标 US¹-US⁰ 被多条正则重复计数）已在 classifyByTag 里修掉，
+	// 这里保留最后一道防线：万一将来出现新的漏计/重计模式，
+	// 把差额计入 Unknown 让前端「地区之和」始终对得上，同时打 Error 保留线索。
 	{
 		sum := 0
 		for _, v := range globalAnalysis.Countries {
@@ -550,10 +588,11 @@ func WriteGlobalAnalysisReport(totalPulled int) {
 		slog.Warn("sortedURLs 样本键", "key", sortedURLs[0])
 	}
 
-	saveDetailedAnalysis(globalAnalysis, subAnalysis, sortedURLs, totalPulled)
+	saveDetailedAnalysis(globalAnalysis, subAnalysis, sortedURLs, totalPulled, perGroup)
 	slog.Info("全局合并报告已生成",
 		"去重可用节点", globalAnalysis.Total,
 		"全组拉取总数", totalPulled,
+		"分组数", len(perGroup),
 		"覆盖地区数", len(globalAnalysis.Countries))
 }
 
@@ -561,7 +600,14 @@ func WriteGlobalAnalysisReport(totalPulled int) {
 // checkCountOverride > 0 时用它作为「探测节点总数」，
 // 全局报告需要传全组累加值：包级 Progress 只保留最后一组的值，
 // 若沿用会让前端「存活率 = 全局可用 / 单组测活」算出 900%+ 的荒谬数字。
-func saveDetailedAnalysis(global *AnalysisStats, subs map[string]*AnalysisStats, sortedURLs []string, checkCountOverride ...int) {
+//
+// perGroup 非 nil 时追加 per_group_geography 段，供前端按组切换查看。
+// 单组报告传 nil（那时只有本组数据，没有「按组筛选」的概念）。
+func saveDetailedAnalysis(global *AnalysisStats,
+	subs map[string]*AnalysisStats,
+	sortedURLs []string,
+	checkCountOverride int,
+	perGroup map[string]*AnalysisStats) {
 	var sb strings.Builder
 	sb.WriteString("# 检测结果分析报告\n")
 	sb.WriteString("# 生成时间: ")
@@ -580,8 +626,8 @@ func saveDetailedAnalysis(global *AnalysisStats, subs map[string]*AnalysisStats,
 		checkCount = AliveCount.Load()
 	}
 	// 全局报告用调用方给的「全组累加值」，避免与 alive_count 口径不一致
-	if len(checkCountOverride) > 0 && checkCountOverride[0] > 0 {
-		checkCount = uint32(checkCountOverride[0])
+	if checkCountOverride > 0 {
+		checkCount = uint32(checkCountOverride)
 	}
 
 	sb.WriteString("check_info:\n")
@@ -675,6 +721,39 @@ func saveDetailedAnalysis(global *AnalysisStats, subs map[string]*AnalysisStats,
 	sb.WriteString("    vps_details_²:")
 	sb.WriteString(formatMap(global.NonCF, "      "))
 	sb.WriteString("\n")
+
+	// per_group_geography：每个组各自的可用节点数与地区分布，供前端下拉切换查看。
+	// 口径说明（写进报告注释，避免使用者误解）：
+	// 同一节点可能被多个组引用（如 all-in-one 聚合 free-a 的产物），
+	// 因此「各组 alive 之和」会大于全局去重后的 alive_count。
+	// 每个组内部各自去重、组间不去重——这才符合「这个组里有什么节点」的语义。
+	if len(perGroup) > 0 {
+		sb.WriteString("\nper_group_geography:\n")
+		// 组名按字典序输出，保证报告稳定可复现
+		groupNames := make([]string, 0, len(perGroup))
+		for g := range perGroup {
+			groupNames = append(groupNames, g)
+		}
+		slices.Sort(groupNames)
+		for _, g := range groupNames {
+			st := perGroup[g]
+			if st == nil {
+				continue
+			}
+			sb.WriteString("  ")
+			sb.WriteString(strconv.Quote(g))
+			sb.WriteString(":\n")
+			sb.WriteString("    alive: ")
+			sb.WriteString(strconv.Itoa(st.Total))
+			sb.WriteString("\n")
+			sb.WriteString("    geography_distribution:")
+			sb.WriteString(formatMap(st.Countries, "      "))
+			sb.WriteString("\n")
+			sb.WriteString("    protocol_distribution:")
+			sb.WriteString(formatMap(st.Types, "      "))
+			sb.WriteString("\n")
+		}
+	}
 
 	// 3. 订阅排行与明细
 	sb.WriteString("\nsubs_ranking:\n")

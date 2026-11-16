@@ -474,8 +474,9 @@ func (app *App) checkProxies() error {
 		totalPulled += int(check.ProxyCount.Load())
 		totalTx += int64(check.TotalBytes.Load())
 
-		// 把本组可用节点并入全局集合（按物理指纹去重），供最终合并报告使用
-		check.CollectGroupAliveNodes(results)
+		// 把本组可用节点并入全局集合（按物理指纹去重），供最终合并报告使用。
+		// 传组名是为了让报告能按组给出各自的地区分布（同一个节点可能被多组引用）。
+		check.CollectGroupAliveNodes(results, grp.Name)
 
 		// 组落盘（all.yaml + mihomo.yaml + history.yaml）
 		save.SaveGroup(grp, results, historyNodes)
