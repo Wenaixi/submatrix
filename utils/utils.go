@@ -2,7 +2,9 @@ package utils
 
 import (
 	"crypto/rand"
+	"log/slog"
 	"math/big"
+	mrand "math/rand"
 	"strconv"
 	"strings"
 
@@ -58,14 +60,22 @@ func WarpURL(url string, isGhProxyAvailable bool) string {
 	return url
 }
 
-// GenerateRandomString 生成指定长度的随机字符串
+// GenerateRandomString 生成指定长度的随机字符串。
+// 优先用 crypto/rand；熵源不可用时回退到 math/rand（可预测性更高，
+// 但换来「服务能启动」而不是直接 panic 打挂初始化流程）。
+// 该函数用于生成 Sub-Store 访问路径等场景，非密码用途。
 func GenerateRandomString(length int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	b := make([]byte, length)
 	for i := range b {
 		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
 		if err != nil {
-			panic(err)
+			// 熵源故障：不 panic（会打挂启动流程），改用非加密随机并记录警告
+			slog.Warn("系统熵源不可用，随机字符串改用非加密回退", "err", err)
+			for j := range b {
+				b[j] = charset[mrand.Intn(len(charset))]
+			}
+			return string(b)
 		}
 		b[i] = charset[n.Int64()]
 	}

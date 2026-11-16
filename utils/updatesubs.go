@@ -123,7 +123,9 @@ func updateSubs(client httpClient, names []string) error {
 	for _, name := range names {
 		url := config.GlobalConfig.MihomoAPIURL + "/providers/proxies/" + name
 		if _, err := makeRequest(client, http.MethodPut, url); err != nil {
+			// 失败时不要继续打印「成功」：成对的「失败 + 成功」日志会误导排障
 			slog.Error("更新订阅失败", "name", name, "error", err)
+			continue
 		}
 		slog.Info("成功更新订阅:", "name", name)
 	}

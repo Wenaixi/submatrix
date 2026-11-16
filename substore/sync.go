@@ -483,7 +483,14 @@ func isSameScpOp(raw json.RawMessage, op ScriptOperator) bool {
 		return false
 	}
 
-	rawContent := canonicalURL(args["content"].(string))
+	// 用带 ok 的断言：args["content"] 可能是 nil 或非字符串
+	// （用户手动编辑 Sub-Store 操作、删掉 content 字段都会触发），
+	// 裸断言会直接 panic 打挂整个同步流程。
+	rawContentStr, ok := args["content"].(string)
+	if !ok {
+		return false
+	}
+	rawContent := canonicalURL(rawContentStr)
 	newContent := canonicalURL(fmt.Sprint(op.Args["content"]))
 	if rawContent != newContent {
 		return false
