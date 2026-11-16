@@ -1034,6 +1034,12 @@ func ParseV2RayJSONLines(data []byte) []map[string]any {
 			nodes = append(nodes, node)
 		}
 	}
+	// 检查扫描错误：某行超过 2MB 缓冲时 Scan 提前返回 false（ErrTooLong），
+	// 后续行不再被处理。打警告让「节点数比预期少」可被定位；
+	// 仍返回已解析部分（本函数设计为尽力而为）。
+	if err := scanner.Err(); err != nil {
+		slog.Warn("V2Ray JSON 行解析提前结束", "err", err, "已解析", len(nodes))
+	}
 	return nodes
 }
 
@@ -1159,6 +1165,9 @@ func ParseBracketKVProxies(data []byte) []map[string]any {
 		if NormalizeNode(node) {
 			nodes = append(nodes, node)
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		slog.Warn("[Proxy] 格式解析提前结束", "err", err, "已解析", len(nodes))
 	}
 	return nodes
 }
