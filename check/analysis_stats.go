@@ -133,6 +133,33 @@ func newAnalysisStats() *AnalysisStats {
 	}
 }
 
+// classifyByTag 按角标归类节点，返回 (类别, 国家代码)。
+// 四类互斥，按信号强度优先级只取第一个命中的：
+// block(⁻¹) > incon(⁰) > consistent(¹⁺) > nonCF(²)。
+//
+// 必须互斥的原因：机场会用复合标注表达「主状态 + 附加状态」，
+// 例如 🇺🇸US¹-US⁰_1（CF 一致、但 IP 不一致）。若四类各自独立匹配，
+// 同一个节点会被计入两次，地区分布之和大于实际节点数（实测稳定多 2）。
+//
+// 只在显式拆分为独立函数后才方便测试与调整优先级。
+func classifyByTag(name string) (category, countryCode string) {
+	probes := []struct {
+		cat string
+		re  *regexp.Regexp
+	}{
+		{"block", reCFBlock},
+		{"incon", reCFInconsistent},
+		{"con", reCFConsistent},
+		{"noncf", reNonCF},
+	}
+	for _, p := range probes {
+		if m := p.re.FindStringSubmatch(name); len(m) > 1 {
+			return p.cat, m[1]
+		}
+	}
+	return "", ""
+}
+
 // applyNodeToStats 把单个可用节点计入统计。
 //
 // 抽成独立函数是为了让「单组报告」与「全局合并报告」共用同一套解析口径：
@@ -149,27 +176,26 @@ func applyNodeToStats(s *AnalysisStats, name, pType string, speed int, speedON b
 	}
 
 	// 节点属性识别
-	hasTag := false
-	// 由于增加了前缀匹配，submatch 的 index 1 才是真正的国家代码
-	if m := reCFInconsistent.FindStringSubmatch(name); len(m) > 1 {
-		s.CFIncon[m[1]]++
-		s.Countries[m[1]]++
-		hasTag = true
-	}
-	if m := reCFConsistent.FindStringSubmatch(name); len(m) > 1 {
-		s.CFCon[m[1]]++
-		s.Countries[m[1]]++
-		hasTag = true
-	}
-	if m := reCFBlock.FindStringSubmatch(name); len(m) > 1 {
-		s.CFBlock[m[1]]++
-		s.Countries[m[1]]++
-		hasTag = true
-	}
-	if m := reNonCF.FindStringSubmatch(name); len(m) > 1 {
-		s.NonCF[m[1]]++
-		s.Countries[m[1]]++
-		hasTag = true
+	//
+	// 四类角标必须互斥：一个节点只按「第一个命中的」归类。
+	// 机场会用复合标注表达「主状态 + 附加状态」，例如 🇺🇸US¹-US⁰_1
+	// （CF 一致、但 IP 不一致）。若四个正则各自独立匹配，同一个节点会给
+	// Countries 加两次，导致地区之和比 Total 多（实测每轮稳定多 2）。
+	// 优先级按「信号强度」排：block(⁻¹) > incon(⁰) > consistent(¹⁺) > nonCF(²)。
+	category, countryCode := classifyByTag(name)
+	hasTag := countryCode != ""
+	if hasTag {
+		switch category {
+		case "block":
+			s.CFBlock[countryCode]++
+		case "incon":
+			s.CFIncon[countryCode]++
+		case "con":
+			s.CFCon[countryCode]++
+		case "noncf":
+			s.NonCF[countryCode]++
+		}
+		s.Countries[countryCode]++
 	}
 
 	// 如果没有上角标，从国旗 Emoji 提取
@@ -407,6 +433,33 @@ func WriteGlobalAnalysisReport(totalPulled int) {
 		// applyNodeToStats 内部还会判 speed > 0，所以「没测速的组」其节点
 		// Speed 为 0，自然不会污染平均速度——按数据判定比按配置判定更准。
 		applyNodeToStats(globalAnalysis, n.Name, n.Type, n.Speed, true)
+	}
+
+	// 逐节点自检只在总和确实不一致时才跑（正常情况零开销）：
+	// 重新逐个统计，找出「单个节点贡献≠1」的那几个，直接打印节点名——
+	// 否则日志只有一句「差额 2」，无法定位是哪两个节点。
+	{
+		sum := 0
+		for _, v := range globalAnalysis.Countries {
+			sum += v
+		}
+		if sum != globalAnalysis.Total {
+			for _, k := range keys {
+				n := nodes[k]
+				probe := newAnalysisStats()
+				applyNodeToStats(probe, n.Name, n.Type, n.Speed, true)
+				pc := 0
+				for _, v := range probe.Countries {
+					pc += v
+				}
+				if pc != probe.Total {
+					slog.Error("单个节点地区计数不对称",
+						"name", n.Name, "type", n.Type,
+						"total", probe.Total, "countries_sum", pc,
+						"countries", probe.Countries)
+				}
+			}
+		}
 	}
 	// 不变式兜底：地区分布之和必须等于节点总数。
 	// 差 2 的历史成因尚未完全定位（疑与某些多码点 emoji 的码点边界有关），

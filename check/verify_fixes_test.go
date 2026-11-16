@@ -59,3 +59,29 @@ func TestReportYAMLWithQuotes(t *testing.T) {
 		t.Errorf("url 的 # 被截断: %v", item["url"])
 	}
 }
+
+// TestCompoundTagNotDoubleCounted 验证复合角标（US¹-US⁰）只计一次地区。
+//
+// 这是实际生产数据里抓到的 bug：🇺🇸US¹-US⁰_1|免费A 同时命中
+// reCFConsistent（US¹）与 reCFInconsistent（US⁰），各加一次 Countries，
+// 导致地区之和比 Total 多 2。修复后按优先级只取第一个命中的类别。
+func TestCompoundTagNotDoubleCounted(t *testing.T) {
+	cases := []string{
+		"🇺🇸US¹-US⁰_1|免费A", // 生产数据里真实出现的复合标注
+		"🇺🇸US¹-US⁰_2|免费A",
+		"🇭🇰HK¹-HK⁻¹_1",   // 理论上也可能出现的组合
+		"🇸🇬SG²-SG¹_1",     // 非CF + CF
+	}
+	for _, n := range cases {
+		s := newAnalysisStats()
+		applyNodeToStats(s, n, "http", 0, false)
+		sum := 0
+		for _, v := range s.Countries {
+			sum += v
+		}
+		if sum != 1 || s.Total != 1 {
+			t.Errorf("%q: 地区之和=%d Total=%d Countries=%v（复合角标被重复计数）",
+				n, sum, s.Total, s.Countries)
+		}
+	}
+}
