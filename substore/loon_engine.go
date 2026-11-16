@@ -150,6 +150,21 @@ func (e *LoonEngine) Execute(execCtx context.Context, req *LoonHTTPRequest, argu
 		memLimit, stackSize := jsRuntimeLimits()
 		rt.SetMemoryLimit(memLimit)
 		rt.SetMaxStackSize(stackSize)
+
+		// 脚本执行超时后主动中断 QuickJS 执行。
+		// Execute 在 execCtx.Done() 时立即向上返回超时错误，但本 goroutine 仍
+		// 锁着 OS 线程跑脚本——若脚本是死循环，会一直占着一个线程直到自己结束。
+		// QuickJS 只在解释器循环的安全点回调此 handler，返回非 0 即中止执行。
+		// 必须在拥有 runtime 的 goroutine 上设置（ensureOwnerAccess 要求）。
+		rt.SetInterruptHandler(func() int {
+			select {
+			case <-execCtx.Done():
+				return 1
+			default:
+				return 0
+			}
+		})
+
 		defer rt.Close()
 
 		ctx := rt.NewContext()
@@ -697,10 +712,28 @@ func (e *LoonEngine) Execute(execCtx context.Context, req *LoonHTTPRequest, argu
 			id := args[0].String()
 			delay := args[1].Int32()
 
-			// 启动 Go 语言级高精度休眠协程，休眠结束后通过 Schedule 唤醒 JS 上下文
+			// 启动 Go 语言级高精度休眠协程，休眠结束后通过 Schedule 唤醒 JS 上下文。
+			// 必须用 select 监听 execCtx：脚本里 setTimeout(fn, 300000) 这种长延时，
+			// 若裸 sleep 会挂住 goroutine 整整 5 分钟，请求早已结束也不退出；
+			// 且 ctx 释放后再调 Schedule 属于 use-after-free。
 			go func() {
+				// delay <= 0 表示立即触发：用已关闭的 channel（永远就绪）。
+				// 不能把 timer 留成 nil——nil channel 在 select 里永远不就绪，
+				// 会把「立即触发」变成「等到请求结束才触发」。
+				var timer <-chan time.Time
 				if delay > 0 {
-					time.Sleep(time.Duration(delay) * time.Millisecond)
+					t := time.NewTimer(time.Duration(delay) * time.Millisecond)
+					defer t.Stop()
+					timer = t.C
+				} else {
+					closed := make(chan time.Time)
+					close(closed)
+					timer = closed
+				}
+				select {
+				case <-execCtx.Done():
+					return
+				case <-timer:
 				}
 				ctx.Schedule(func(inner *quickjs.Context) {
 					fireCode := fmt.Sprintf(`__fire_timer("%s");`, id)
