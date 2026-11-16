@@ -477,4 +477,40 @@ subAnalysis 键数=24   sortedURLs 键数=24   交集=0
 改完统计输出后，**不能只看文件内容像不像**（肉眼看着是合法 YAML 也可能解析失败）。
 必须真的跑一次 `goccy/go-yaml` 的 `Unmarshal`，或 curl 接口确认返回体含 `report_data`。
 
+## 16. 复合角标导致地区重复计数（2026-11-17 根因定位并修复）
+
+### 症状
+每轮检测的日志里都有 `地区统计不一致 total=X countries_sum=X+2 diff=2`，
+**稳定为 2**，不是随机竞态。
+
+### 定位过程（「加诊断日志」如何换来根因）
+先在 `WriteGlobalAnalysisReport` 里加了一个**只在总和确实不一致时才跑**的
+逐节点自检（正常情况零开销，异常时打印每个不合格节点的名字）。一次端到端
+检测就直接打出了元凶：
+```
+单个节点地区计数不对称 name=🇺🇸US¹-US⁰_1|免费A type=http total=1 countries_sum=2
+单个节点地区计数不对称 name=🇺🇸US¹-US⁰_2|免费A type=http total=1 countries_sum=2
+```
+
+### 根因
+机场用**复合标注**表达「主状态 + 附加状态」：`🇺🇸US¹-US⁰` 表示
+「CF 一致（¹）、但 IP 不一致（⁰）」。四条角标正则**各自独立匹配**：
+`US¹` 命中 `reCFConsistent`、`US⁰` 命中 `reCFInconsistent`，
+于是同一个节点给 `Countries` 加了两次。
+
+### 修法
+抽出 `classifyByTag(name)`，四类**互斥**只取第一个命中的，按信号强度排序：
+`block(⁻¹) > incon(⁰) > consistent(¹⁺) > nonCF(²)`。
+
+### 为什么此前的穷举测试没抓到
+测试只用了**单角标**命名（`US⁰`、`SG¹⁺`、`TW²`），从没构造过
+`XX¹-XX⁰` 这种**双段复合**格式。教训：解析类测试要覆盖「格式的组合与嵌套」，
+不只是单一形态的枚举。
+
+### 当前不变式（两条，都要校验）
+- `sum(geography_distribution) == alive_count`
+- `sum(protocol_distribution) == alive_count`
+两条都过才证明「每个节点恰好被计入一次地区、一次协议」。
+
+
 
