@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/metacubex/mihomo/common/convert"
-	"github.com/Wenaixi/submatrix/config"
 	"github.com/Wenaixi/submatrix/utils"
 )
 
@@ -113,8 +112,11 @@ func FetchCFTraceFirstConcurrent(httpClient *http.Client, ctx context.Context, c
 	var once sync.Once
 	var wg sync.WaitGroup
 
-	// 订阅拉取的重试次数不适合直接用在这里：过大时会在失败后紧贴着狂刷请求；为 0 时则一次都不会请求
-	retries := min(max(config.GlobalConfig.SubUrlsReTry, 1), 1)
+	// 每个端点只试一次。
+	// 原写法 min(max(SubUrlsReTry, 1), 1) 恒等于 1（min 的上限就是 1），
+	// 既没用上配置又读起来像「有上限控制」，容易误判。这里直接写死并说明理由：
+	// CF trace 是竞速探测，失败就该立刻换端点，重试只会贴着失败源头狂刷请求。
+	const retries = 1
 
 	for _, baseURL := range apis {
 		wg.Add(1)
