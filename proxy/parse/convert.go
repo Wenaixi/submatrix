@@ -1054,6 +1054,10 @@ func ParseSurfboardProxies(data []byte) []map[string]any {
 func ParseBracketKVProxies(data []byte) []map[string]any {
 	var nodes []map[string]any
 	scanner := bufio.NewScanner(bytes.NewReader(data))
+	// 必须放大缓冲区：默认上限是 bufio.MaxScanTokenSize（64KB）。
+	// base64 编码的订阅常常是「一整行几百 KB 的超长字符串」，
+	// 用默认值会让 Scan 直接返回 ErrTooLong、整份内容一个节点都提取不出来。
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
 		lineBytes := scanner.Bytes()               // 使用 Bytes 避免 string 分配
 		line := string(bytes.TrimSpace(lineBytes)) // 必要的分配

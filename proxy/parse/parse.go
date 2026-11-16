@@ -211,6 +211,10 @@ func coveredByStdConvert(raw string) bool {
 // 带前导前缀、wg/ssr/mieru/hy 等非标写法。
 func parseRawLinesOpt(data []byte, subURL string, skipStd bool) ([]map[string]any, int) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
+	// 放大缓冲区：默认上限 bufio.MaxScanTokenSize（64KB），
+	// 而 base64 编码的订阅常常是「一整行几百 KB」，用默认值会直接
+	// ErrTooLong 中断，整份内容一个节点都提取不出来。
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	var lines []string
 	for scanner.Scan() {
 		raw := scanner.Text()
@@ -221,6 +225,9 @@ func parseRawLinesOpt(data []byte, subURL string, skipStd bool) ([]map[string]an
 		if line != "" && !strings.HasPrefix(line, "#") {
 			lines = append(lines, strings.TrimLeft(line, "- "))
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		slog.Warn("逐行链接扫描提前结束", "err", err, "已收集行", len(lines))
 	}
 	if len(lines) == 0 {
 		return nil, 0
