@@ -543,6 +543,50 @@ sum(该组 geography_distribution) == 该组 alive
 sum(该组 protocol_distribution) == 该组 alive
 ```
 
+## 18. 节点明细页：存活硬删除 / 协议与速度软禁用（2026-11-18 新增）
+
+### 三种状态（这是全项目的统一口径）
+| 状态 | 含义 | 是否进 all.yaml | 能否恢复 |
+|---|---|---|---|
+| `alive` | 测活通过 + 速度达标 + 协议允许 | 是 | — |
+| `skipped` | 协议命中 `filter-protocols` | **否** | 改 filter-protocols 后重跑 |
+| `slow` | 速度低于 `min-speed` | **否** | 改 min-speed 后重跑 |
+| 死亡 | 测活失败 | 否 | **硬删除，永久消失** |
+
+死节点在 `check/check.go` 的 `alive_fail` 分支 `job.Close() + continue` 后
+就不存在了——它从不进入 `resultChan`，因此在任何产物、任何接口里都看不到。
+这是「存活过滤=硬删除」的实现方式，不是靠后续过滤。
+
+### 产物分层
+```
+groups/<name>/
+  all.yaml         仅 alive（客户端直用；实测 _state 出现 0 次）
+  all-raw.yaml     全量（alive+skipped+slow），同样剥离 _state
+  nodes-view.json  前端展示载荷，含 state 与 reason，不含任何凭据
+```
+`_state` / `_state_reason` 是**内部标记**，`stripInternalState` 会在写
+all.yaml / all-raw.yaml 前剥离。它们在 share_handler.go 里是**可对外分享**的文件，
+不能把内部字段暴露给客户端。
+
+### 状态判定的兼容性（易踩）
+`save.go` 判定状态时 `_state` 优先，缺失则**回退看旧的 `skipped: bool`**。
+两套标记并存的原因：`_state` 是新增的（带可读原因），`skipped` 是既有字段，
+历史产物与部分测试仍只带后者。只认 `_state` 会让这些节点被误判成 alive
+（`TestSaveGroupAllSkipped` 就是因此失败的）。
+
+### 接口
+`GET /api/nodes-view?group=X`
+- 有 group：直读该组 `nodes-view.json`
+- 无 group：合并各组 nodes 并汇总 total/alive/skipped/slow
+- 组名走 `groupNamePattern` 校验（防路径穿越）
+
+### 验证手法（改这块必做）
+1. 临时给某组配 `filter-protocols: [vless]`，跑一次检测，确认：
+   - `nodes-view.json` 里 skipped > 0 且每条带原因
+   - `alive` 里该协议数量为 0
+2. `grep -c "_state" output/groups/*/all.yaml` 必须全为 0
+3. 验证完**记得恢复配置并重启容器**（容器内热重载不可靠）
+
 
 
 
