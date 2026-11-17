@@ -2,6 +2,7 @@
 package save
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"regexp"
@@ -375,19 +376,43 @@ func SaveGroup(grp config.ResolvedGroupConfig, results []check.Result, historyPo
 		return
 	}
 
-	// 1. 过滤 + 清洗本次结果（区分已检测与 skipped 保留节点）
-	proxiesList := make([]map[string]any, 0, len(results)) // 已检测（供客户端直用）
-	rawList := make([]map[string]any, 0, len(results))     // 全量（含 skipped 未检测）
+	// 1. 按 _state 分流：
+	//    all.yaml 只放「真正可用」的节点（alive）——客户端直用，不能混入禁用的
+	//    nodes-view.json 放全部三种状态（alive/skipped/slow），供前端节点明细页展示
+	//    死节点根本不在这里（check 层就没送出来），符合「存活过滤=硬删除」
+	//
+	// 注意：_state / _state_reason 是本项目的内部标记，只用于前端展示，
+	// 不能写进 all.yaml / all-raw.yaml——那是给客户端直接加载的配置，
+	// 混入未知字段会污染客户端的节点定义。落盘前统一剥离。
+	proxiesList := make([]map[string]any, 0, len(results)) // 仅 alive，供客户端直用
+	rawList := make([]map[string]any, 0, len(results))     // 全量视图（alive+skipped+slow，含内部标记）
 	for _, r := range results {
 		if r.Proxy == nil {
 			continue
 		}
 		clean := sanitizeProxyForYAML(r.Proxy)
-		rawList = append(rawList, clean)
-		if skipped, _ := clean["skipped"].(bool); skipped {
-			continue
+		// 判定状态：_state 优先；没有则回退看旧标记 skipped:
+		// 两套标记并存是因为 _state 是本轮新增的（携带可读原因），
+		// 而 skipped 是既有字段，历史产物与部分测试仍只带它。
+		// 两者都缺省时视为 alive（成功路径不写标记）。
+		state, _ := clean["_state"].(string)
+		if state == "" {
+			if skipped, _ := clean["skipped"].(bool); skipped {
+				state = "skipped"
+				clean["_state"] = state
+				if _, ok := clean["_state_reason"]; !ok {
+					clean["_state_reason"] = "协议在过滤列表内"
+				}
+			} else {
+				state = "alive"
+				clean["_state"] = state
+			}
 		}
-		proxiesList = append(proxiesList, clean)
+		rawList = append(rawList, clean)
+		// 只有 alive 进 all.yaml；skipped/slow 是软禁用，只出现在视图里
+		if state == "alive" {
+			proxiesList = append(proxiesList, stripInternalState(clean))
+		}
 	}
 
 	// 2. 单组节点上限（仅截取已检测列表，raw 全量保留）
@@ -404,12 +429,25 @@ func SaveGroup(grp config.ResolvedGroupConfig, results []check.Result, historyPo
 		slog.Error("组产物落盘不完整", "组", grp.Name)
 	}
 
-	// 4. 落盘 all-raw.yaml（全量原始，含 skipped 未检测节点）
+	// 4. 落盘 all-raw.yaml（全量原始，含 skipped / slow 等软禁用节点）。
+	// 写盘前剥离内部标记：这是客户端可加载的配置，不能带 _state。
 	if len(rawList) > 0 {
-		if data, err := yaml.Marshal(map[string]any{"proxies": rawList}); err != nil {
+		stripped := make([]map[string]any, 0, len(rawList))
+		for _, n := range rawList {
+			stripped = append(stripped, stripInternalState(n))
+		}
+		if data, err := yaml.Marshal(map[string]any{"proxies": stripped}); err != nil {
 			slog.Error("序列化全量原始节点失败", "组", grp.Name, "err", err)
 		} else {
 			writeGroupFile(filepath.Join(groupDir, "all-raw.yaml"), data)
+		}
+
+		// 4b. 同时落一份 JSON 给前端「节点明细」页：浏览器侧解析 YAML 不便，
+		// JSON 直接 JSON.parse 即可。只保留展示需要的字段，减小体积。
+		if data, err := json.Marshal(buildNodeViewPayload(grp.Name, rawList)); err != nil {
+			slog.Error("序列化节点视图失败", "组", grp.Name, "err", err)
+		} else {
+			writeGroupFile(filepath.Join(groupDir, "nodes-view.json"), data)
 		}
 	}
 
@@ -437,6 +475,97 @@ func SaveGroup(grp config.ResolvedGroupConfig, results []check.Result, historyPo
 	}
 
 	// 成功日志已在调用 writeGroupYAML 之后打印（据其返回值决定），此处不再重复
+}
+
+// stripInternalState 返回去掉内部标记字段的节点副本。
+// _state / _state_reason 只服务于前端展示与分流决策，
+// 写进客户端配置（all.yaml / all-raw.yaml）会污染节点定义。
+func stripInternalState(n map[string]any) map[string]any {
+	out := make(map[string]any, len(n))
+	for k, v := range n {
+		if k == "_state" || k == "_state_reason" {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// nodeViewItem 是前端「节点明细」页需要的字段子集。
+// 刻意不导出完整节点 map：里面有密码/UUID/私钥等凭据，
+// 前端展示只需要状态、名称、协议、地区、速度这些无敏感信息。
+type nodeViewItem struct {
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	State    string `json:"state"`              // alive | skipped | slow
+	Reason   string `json:"reason,omitempty"`   // 软禁用原因（可恢复的提示）
+	SERVER   string `json:"server,omitempty"`   // 服务器地址（不是凭据）
+	Port     any    `json:"port,omitempty"`
+	Speed    int    `json:"speed,omitempty"`    // KB/s，仅测过速的有值
+	Network  string `json:"network,omitempty"`
+	SubTag   string `json:"sub_tag,omitempty"`
+}
+
+type nodeViewPayload struct {
+	Group    string         `json:"group"`
+	Total    int            `json:"total"`
+	Alive    int            `json:"alive"`
+	Skipped  int            `json:"skipped"`
+	Slow     int            `json:"slow"`
+	Nodes    []nodeViewItem `json:"nodes"`
+}
+
+// buildNodeViewPayload 从全量节点 map 提炼出前端展示用的小结构。
+// 绝不含 password/uuid/private-key 等凭据字段。
+func buildNodeViewPayload(groupName string, nodes []map[string]any) nodeViewPayload {
+	payload := nodeViewPayload{
+		Group: groupName,
+		Total: len(nodes),
+		Nodes: make([]nodeViewItem, 0, len(nodes)),
+	}
+	for _, n := range nodes {
+		state, _ := n["_state"].(string)
+		if state == "" {
+			state = "alive"
+		}
+		switch state {
+		case "alive":
+			payload.Alive++
+		case "skipped":
+			payload.Skipped++
+		case "slow":
+			payload.Slow++
+		}
+		item := nodeViewItem{
+			State:    state,
+			Reason:   toStringField(n["_state_reason"]),
+			Name:     toStringField(n["name"]),
+			Type:     toStringField(n["type"]),
+			SERVER:   toStringField(n["server"]),
+			SubTag:   toStringField(n["sub_tag"]),
+			Network:  toStringField(n["network"]),
+		}
+		item.Port = n["port"]
+		// 速度：优先 _speed（若 check 层写过），否则从 speed 字段读
+		if v, ok := n["speed"].(int); ok {
+			item.Speed = v
+		} else if v, ok := n["speed"].(float64); ok {
+			item.Speed = int(v)
+		}
+		payload.Nodes = append(payload.Nodes, item)
+	}
+	return payload
+}
+
+// toStringField 安全地把 map 里的值转成字符串（缺失或 nil 返回空串）。
+func toStringField(v any) string {
+	if v == nil {
+		return ""
+	}
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return fmt.Sprint(v)
 }
 
 // writeGroupFile 落盘单个组文件并检查写入结果。

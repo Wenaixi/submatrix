@@ -4,6 +4,7 @@ package app
 import (
 	"bufio"
 	"crypto/subtle"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
@@ -398,6 +399,7 @@ func (app *App) registerAPIRoutes(router *gin.Engine) {
 		api.GET("/logs", app.getLogs)
 		api.POST("/logs/clear", app.clearLogsHandler)
 		api.GET("/analysis-report", app.getAnalysisReport)
+		api.GET("/nodes-view", app.getNodesView)
 		api.POST("/proxy/check", app.proxyCheckHandler)
 		api.POST("/proxy/check-github", app.checkGhProxyHandler)
 		api.GET("/groups", app.getGroupsHandler)
@@ -832,6 +834,95 @@ func (app *App) getAnalysisReport(c *gin.Context) {
 
 	// 解析失败的兜底
 	c.JSON(http.StatusOK, gin.H{"report": string(data)})
+}
+
+// getNodesView 返回某组的节点明细（含 alive / skipped / slow 三种状态）。
+//
+// 数据源是检测时落盘的 groups/<name>/nodes-view.json（save 层生成，
+// 只含展示字段、不含任何凭据）。前端「节点明细」区块用它渲染表格。
+//
+// 无 group 参数时返回「全部组」的合并视图：读所有组的 nodes-view.json 拼起来。
+func (app *App) getNodesView(c *gin.Context) {
+	group := strings.TrimSpace(c.Query("group"))
+
+	saver, err := method.NewLocalSaver()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取输出目录失败"})
+		return
+	}
+
+	// 组名参与路径拼接，必须校验字符集（防路径穿越）
+	if group != "" && !groupNamePattern.MatchString(group) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "组名非法"})
+		return
+	}
+
+	readOne := func(name string) (map[string]any, bool) {
+		p := filepath.Join(saver.OutputPath, "groups", name, "nodes-view.json")
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return nil, false
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(data, &payload); err != nil {
+			slog.Warn("节点视图解析失败", "组", name, "err", err)
+			return nil, false
+		}
+		return payload, true
+	}
+
+	if group != "" {
+		payload, ok := readOne(group)
+		if !ok {
+			c.JSON(http.StatusOK, gin.H{
+				"group": group, "total": 0, "alive": 0, "skipped": 0, "slow": 0,
+				"nodes": []any{}, "note": "该组暂无节点视图（可能本轮未检测成功）",
+			})
+			return
+		}
+		c.JSON(http.StatusOK, payload)
+		return
+	}
+
+	// 全部组：把每个组的 nodes 拼起来，并汇总计数
+	merged := gin.H{
+		"group": "", "total": 0, "alive": 0, "skipped": 0, "slow": 0, "nodes": []any{},
+	}
+	var allNodes []any
+	total, alive, skipped, slow := 0, 0, 0, 0
+	for _, g := range config.GlobalConfig.Groups {
+		payload, ok := readOne(g.Name)
+		if !ok {
+			continue
+		}
+		if nodes, ok := payload["nodes"].([]any); ok {
+			allNodes = append(allNodes, nodes...)
+		}
+		total += intField(payload["total"])
+		alive += intField(payload["alive"])
+		skipped += intField(payload["skipped"])
+		slow += intField(payload["slow"])
+	}
+	merged["nodes"] = allNodes
+	merged["total"] = total
+	merged["alive"] = alive
+	merged["skipped"] = skipped
+	merged["slow"] = slow
+	c.JSON(http.StatusOK, merged)
+}
+
+// intField 从 any 里安全取整数（JSON 解出来可能是 float64）。
+func intField(v any) int {
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	case int64:
+		return int(n)
+	default:
+		return 0
+	}
 }
 
 // handleAnalysis 渲染检测分析报告页面

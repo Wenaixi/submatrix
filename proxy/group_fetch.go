@@ -93,9 +93,13 @@ func FetchGroupProxies(grp config.ResolvedGroupConfig) ([]map[string]any, int, e
 			if typ == "" || typ == "invalid" {
 				continue
 			}
-			// 组协议过滤：命中的节点不丢弃，打 skipped 标记保留（不检测但落盘）
+			// 组协议过滤：命中的节点不丢弃，打 skipped 标记保留（不检测但落盘）。
+			// _state 是给前端看的统一状态字段：alive / skipped(协议禁用) / slow(速度禁用)。
+			// 死节点不进任何产物，因此没有 dead 状态。
 			if grp.MatchesProtocol(typ) {
 				node["skipped"] = true
+				node["_state"] = "skipped"
+				node["_state_reason"] = "协议 " + typ + " 在过滤列表内"
 			}
 			// 字段语义修正；返回 false 表示该节点无效
 			if !parse.NormalizeNode(node) {

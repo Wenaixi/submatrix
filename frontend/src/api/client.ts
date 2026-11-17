@@ -261,6 +261,34 @@ export interface AnalysisReportResponse {
 }
 export const getAnalysisReport = () => apiRequest<AnalysisReportResponse>("/api/analysis-report");
 
+// 节点明细：某组的全部节点（alive / skipped 协议禁用 / slow 速度禁用），不含凭据
+export interface NodeViewItem {
+  name: string;
+  type: string;
+  state: 'alive' | 'skipped' | 'slow';
+  reason?: string;
+  server?: string;
+  port?: string | number;
+  speed?: number;
+  network?: string;
+  sub_tag?: string;
+}
+
+export interface NodesViewResponse {
+  group: string;
+  total: number;
+  alive: number;
+  skipped: number;
+  slow: number;
+  nodes: NodeViewItem[];
+  note?: string;
+}
+
+export const getNodesView = (group: string) => {
+  const q = group ? `?group=${encodeURIComponent(group)}` : '';
+  return apiRequest<NodesViewResponse>(`/api/nodes-view${q}`);
+};
+
 // 6. 配置中心
 export interface ConfigResponse {
   content: string;

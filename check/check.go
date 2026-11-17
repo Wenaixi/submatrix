@@ -944,6 +944,15 @@ func (pc *ProxyChecker) runSpeedStage(ctx context.Context, cancel context.Cancel
 				}
 				if !success {
 					pc.scoreAndRecycle(job.Result.Proxy, "speed_fail", 0, nil) // 失败打分扣除
+					// 速度不达标不再直接丢弃：标记 _state=slow 后仍送入 collector，
+					// 由上层决定「软禁用」而不是消失——用户调整 min-speed 后即可恢复。
+					// 注意 scoreAndRecycle 已经先执行，历史池逻辑与改动前完全一致。
+					if job.Result.Proxy != nil {
+						job.Result.Proxy["_state"] = "slow"
+						job.Result.Proxy["_state_reason"] = "速度低于门槛"
+						job.Result.Speed = speed
+						pc.resultChan <- job.Result
+					}
 					job.Close()
 					continue
 				}

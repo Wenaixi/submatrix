@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AnalysisReportResponse, getAnalysisReport, SubRankingItem } from '../api/client';
+import { AnalysisReportResponse, getAnalysisReport, getNodesView, NodesViewResponse, SubRankingItem } from '../api/client';
 import { RefreshCw, Globe, ShieldCheck, Activity, Award, AlertTriangle, Copy, Clock, Zap, Database } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { WorldMap } from '../components/WorldMap';
@@ -446,6 +446,177 @@ export const AnalysisView: React.FC = () => {
                 </span>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* 节点明细：展示某组全部节点及其状态（alive / 协议禁用 / 速度禁用） */}
+      <NodeDetailSection
+        groups={groupNames}
+        selectedGroup={selectedGroup}
+        onGroupChange={setSelectedGroup}
+      />
+    </div>
+  );
+};
+
+// ---------- 节点明细区块 ----------
+
+const STATE_META: Record<string, { label: string; color: string; icon: string }> = {
+  alive: { label: '活跃', color: 'var(--success)', icon: '✅' },
+  skipped: { label: '禁用·协议', color: 'var(--warning, #d97706)', icon: '⏸' },
+  slow: { label: '禁用·速度', color: 'var(--warning, #d97706)', icon: '⏸' },
+};
+
+const NodeDetailSection: React.FC<{
+  groups: string[];
+  selectedGroup: string;
+  onGroupChange: (g: string) => void;
+}> = ({ groups, selectedGroup, onGroupChange }) => {
+  const { showToast } = useToast();
+  const [data, setData] = useState<NodesViewResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [stateFilter, setStateFilter] = useState<'all' | 'alive' | 'skipped' | 'slow'>('all');
+  const [keyword, setKeyword] = useState('');
+
+  const load = async (g: string) => {
+    setLoading(true);
+    try {
+      setData(await getNodesView(g));
+    } catch (e: any) {
+      showToast(`加载节点明细失败: ${e.message}`, true);
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(selectedGroup); }, [selectedGroup]);
+
+  const nodes = data?.nodes || [];
+  const filtered = nodes.filter((n) => {
+    if (stateFilter !== 'all' && n.state !== stateFilter) return false;
+    if (keyword) {
+      const k = keyword.toLowerCase();
+      if (!n.name.toLowerCase().includes(k) && !(n.server || '').toLowerCase().includes(k)) return false;
+    }
+    return true;
+  });
+
+  // 分页：节点可能上千个，一次渲染全部会卡
+  const PAGE = 100;
+  const [page, setPage] = useState(0);
+  useEffect(() => { setPage(0); }, [selectedGroup, stateFilter, keyword]);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE));
+  const pageNodes = filtered.slice(page * PAGE, (page + 1) * PAGE);
+
+  return (
+    <div style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+      {/* 标题 + 控制条 */}
+      <div style={{
+        padding: '14px 20px',
+        borderBottom: '1px solid var(--border)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px',
+        flexWrap: 'wrap',
+      }}>
+        <h3 style={{ fontSize: '15px', fontWeight: 500 }}>节点明细</h3>
+        {data && (
+          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+            共 {data.total} 个 · 活跃 {data.alive} · 禁用 {data.skipped + data.slow}
+          </span>
+        )}
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <select
+            value={selectedGroup}
+            onChange={(e) => onGroupChange(e.target.value)}
+            style={{ padding: '5px 10px', fontSize: '12px', background: 'var(--surface-1)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: '4px' }}
+          >
+            <option value="">全部组</option>
+            {groups.map((g) => <option key={g} value={g}>{g}</option>)}
+          </select>
+          <select
+            value={stateFilter}
+            onChange={(e) => setStateFilter(e.target.value as any)}
+            style={{ padding: '5px 10px', fontSize: '12px', background: 'var(--surface-1)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: '4px' }}
+          >
+            <option value="all">全部状态</option>
+            <option value="alive">仅活跃</option>
+            <option value="skipped">仅协议禁用</option>
+            <option value="slow">仅速度禁用</option>
+          </select>
+          <input
+            placeholder="搜索名称或服务器"
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            style={{ padding: '5px 10px', fontSize: '12px', background: 'var(--surface-1)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: '4px', width: '180px' }}
+          />
+        </div>
+      </div>
+
+      {/* 表体 */}
+      {loading ? (
+        <div style={{ padding: '24px', textAlign: 'center', fontSize: '13px', color: 'var(--text-secondary)' }}>加载中…</div>
+      ) : !data ? (
+        <div style={{ padding: '24px', textAlign: 'center', fontSize: '13px', color: 'var(--text-secondary)' }}>暂无节点数据</div>
+      ) : data.note ? (
+        <div style={{ padding: '24px', textAlign: 'center', fontSize: '13px', color: 'var(--text-secondary)' }}>{data.note}</div>
+      ) : filtered.length === 0 ? (
+        <div style={{ padding: '24px', textAlign: 'center', fontSize: '13px', color: 'var(--text-secondary)' }}>没有符合筛选条件的节点</div>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+            <thead>
+              <tr style={{ background: 'var(--surface-1)', color: 'var(--text-secondary)' }}>
+                {['状态', '名称', '协议', '服务器', '速度', '订阅标签'].map((h) => (
+                  <th key={h} style={{ textAlign: 'left', padding: '8px 14px', fontWeight: 500, whiteSpace: 'nowrap' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {pageNodes.map((n, i) => {
+                const meta = STATE_META[n.state] || STATE_META.alive;
+                return (
+                  <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
+                    <td style={{ padding: '7px 14px', whiteSpace: 'nowrap', color: meta.color }}>
+                      {meta.icon} {meta.label}
+                      {n.reason && (
+                        <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px' }}>{n.reason}</div>
+                      )}
+                    </td>
+                    <td style={{ padding: '7px 14px', wordBreak: 'break-all', maxWidth: '320px' }}>{n.name}</td>
+                    <td style={{ padding: '7px 14px', whiteSpace: 'nowrap' }}>{n.type}</td>
+                    <td style={{ padding: '7px 14px', wordBreak: 'break-all', maxWidth: '220px', color: 'var(--text-secondary)' }}>
+                      {n.server}{n.port ? `:${n.port}` : ''}
+                    </td>
+                    <td style={{ padding: '7px 14px', whiteSpace: 'nowrap', color: 'var(--text-secondary)' }}>
+                      {n.speed ? `${n.speed} KB/s` : '—'}
+                    </td>
+                    <td style={{ padding: '7px 14px', whiteSpace: 'nowrap', color: 'var(--text-secondary)' }}>{n.sub_tag || '—'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* 分页 */}
+      {pageCount > 1 && (
+        <div style={{
+          padding: '10px 20px',
+          borderTop: '1px solid var(--border)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          fontSize: '12px',
+          color: 'var(--text-secondary)',
+        }}>
+          <span>第 {page + 1} / {pageCount} 页 · 共 {filtered.length} 条</span>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button className="btn-ghost" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>上一页</button>
+            <button className="btn-ghost" disabled={page >= pageCount - 1} onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}>下一页</button>
           </div>
         </div>
       )}
