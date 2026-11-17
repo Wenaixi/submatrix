@@ -587,6 +587,74 @@ all.yaml / all-raw.yaml 前剥离。它们在 share_handler.go 里是**可对外
 2. `grep -c "_state" output/groups/*/all.yaml` 必须全为 0
 3. 验证完**记得恢复配置并重启容器**（容器内热重载不可靠）
 
+## 19. 统一命名与原始名（2026-11-18 新增）
+
+### 统一命名 `unify-name`
+开启后同组节点共用一个基础名，序号由 `RenameDuplicateNodes` 自动追加：
+```
+MTF 组、MTF 组-1、MTF 组-2 ……
+```
+基础名优先级：`node-prefix` → `display-name` → 组名。
+统一命名时**不再追加 `|sub_tag` 后缀**（否则名字又乱回去）。
+
+### 三条必须记住的实现细节
+1. **`RenameDuplicateNodes` 必须作用于主产物**。
+   它原先只用在历史池（save.go 的 historyPool 去重处），
+   主产物 `proxiesList` 从来没做名称唯一化。统一命名一开，
+   同组节点基础名完全相同，不补这一步就会出现一堆无法区分的同名节点。
+   位置在 `SuccessLimit` 截取**之前**（否则截取后可能又重名）。
+2. **`raw_name` 在重命名之前捕获**。
+   `updateProxyName` 开头先把原始 `name` 存进 `raw_name`，
+   否则重命名覆盖后就再也拿不到机场原本的命名。
+   `raw_name` 已在 `sanitizeProxyForYAML` 的字符串白名单内。
+3. **节点明细在「节点分组」页，不在「节点统计」页**。
+   每个组卡片下方就地展开（复用 `/api/nodes-view`），
+   改完组配置能立刻对比节点变化，不用两页来回跳。
+
+### 命名链路全貌（改名字相关逻辑时照这张图核对）
+```
+原始名 raw_name（先在 updateProxyName 开头保存）
+   ↓
+RenameNode 开启时改 name：
+   ├─ UnifyName → node-prefix || display-name || 组名
+   └─ 否则     → NodePrefix + Rename(国家,角标,增强标签)
+   ↓
+追加标签：速度 / 平台 / sub_tag（UnifyName 时跳过 sub_tag）/ ISP
+   ↓
+save 层 RenameDuplicateNodes 补序号
+```
+
+## 20. 前端改动必须「vite build → docker build → 重启容器」三步连做（重要）
+
+### 症状
+改完前端、`docker build` 了、容器也重启了，但浏览器里看不到新功能。
+
+### 根因（踩过两次）
+前端产物 `webui/static/dist/*` 通过 `//go:embed` 烤进二进制，
+所以**镜像里的前端 = 构建那一刻磁盘上的 app.js**。
+如果先 `docker build` 再 `vite build`，镜像里就是旧版；
+如果只 `vite build` 不重建镜像，镜像里也是旧版。
+
+### 正确顺序
+```bash
+cd frontend && npx vite build
+cd .. && docker build -f Dockerfile -t submatrix:xxx .
+docker rm -f submatrix-test && docker run ... submatrix:xxx
+```
+
+### 排障：确认镜像里到底是哪个版本
+```bash
+curl -s http://127.0.0.1:8199/static/dist/app.js | grep -c "<新功能的某个中文字串>"
+# 返回 1 = 已更新；0 = 镜像里是旧版
+```
+浏览器端还需 `Network.clearBrowserCache` + `Page.reload(ignoreCache=True)`，
+普通 reload 会用缓存的旧 JS。
+
+### 验证时注意
+用 `bs4`/JS 检查页面是否含某中文串时，**确认字码正确**。
+本会话曾把「看」写成 `0x7709`（那是「眉」），误判功能没生效。
+正确：查 0x67e5 / 看 0x770b / 节 0x8282 / 点 0x70b9。
+
 
 
 
