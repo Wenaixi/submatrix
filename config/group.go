@@ -29,6 +29,11 @@ type GroupConfig struct {
 	AppendOriginalName *bool    `json:"append_original_name" yaml:"append-original-name"`
 	EnhancedTag        *bool    `json:"enhanced_tag" yaml:"enhanced-tag"`
 	NodePrefix         *string  `json:"node_prefix" yaml:"node-prefix"`
+	// UnifyName 统一命名：开启后同组所有节点都用同一个基础名（默认取组名），
+	// 由 RenameDuplicateNodes 自动追加 -1 / -2 序号。
+	// 与 NodePrefix 的区别：前缀只是加在 Rname(国家,角标) 前面，
+	// 统一命名则完全丢弃国家/角标，得到 mtf-1、mtf-2 这种整齐的名字。
+	UnifyName *bool `json:"unify_name" yaml:"unify-name"`
 	ISPCheck           *bool    `json:"isp_check" yaml:"isp-check"`
 	DropOnFail         *bool    `json:"drop_on_fail" yaml:"drop-on-fail"`
 	RulePreset         string   `json:"rule_preset" yaml:"rule-preset"`
@@ -73,6 +78,7 @@ type ResolvedGroupConfig struct {
 	SpeedTestURL string
 	Platforms    []string
 	NodePrefix   string
+	UnifyName    bool
 	ISPCheck     bool
 }
 
@@ -136,6 +142,7 @@ func ResolveGroup(g GroupConfig, global Config) ResolvedGroupConfig {
 		SpeedTestURL: global.SpeedTestURL,
 		Platforms:    global.Platforms,
 		NodePrefix:   global.NodePrefix,
+		UnifyName:    global.UnifyName,
 		ISPCheck:     global.ISPCheck,
 	}
 
@@ -169,6 +176,9 @@ func ResolveGroup(g GroupConfig, global Config) ResolvedGroupConfig {
 	}
 	if g.NodePrefix != nil {
 		res.NodePrefix = *g.NodePrefix
+	}
+	if g.UnifyName != nil {
+		res.UnifyName = *g.UnifyName
 	}
 	if g.ISPCheck != nil {
 		res.ISPCheck = *g.ISPCheck
@@ -232,6 +242,7 @@ func ResolveAllGroups(global Config) []ResolvedGroupConfig {
 				SpeedTestURL: global.SpeedTestURL,
 				Platforms:    global.Platforms,
 				NodePrefix:   global.NodePrefix,
+				UnifyName:    global.UnifyName,
 				ISPCheck:     global.ISPCheck,
 			},
 		}

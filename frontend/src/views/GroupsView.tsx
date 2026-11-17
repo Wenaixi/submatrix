@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { GroupItem, saveGroups, toggleGroup } from '../api/client';
+import { GroupItem, saveGroups, toggleGroup, getNodesView, NodesViewResponse } from '../api/client';
 import { Switch } from '../components/Switch';
 import { useToast } from '../components/Toast';
 import { InfoTooltip } from '../components/InfoTooltip';
-import { Copy, Plus, Trash2, Save, ChevronDown, ChevronRight, Sliders } from 'lucide-react';
+import { Copy, Plus, Trash2, Save, ChevronDown, ChevronRight, Sliders, Eye } from 'lucide-react';
 
 interface GroupsViewProps {
   groups: GroupItem[];
@@ -19,6 +19,11 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, apiKe
   // 拖拽排序状态
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [overIdx, setOverIdx] = useState<number | null>(null);
+  // 当前展开节点明细的组名（null = 全部收起）
+  const [openDetail, setOpenDetail] = useState<string | null>(null);
+  const toggleDetail = (name: string) => {
+    setOpenDetail((prev) => (prev === name ? null : name));
+  };
 
   // 拖拽重排：drop 时把拖起卡片移到目标位置，并按新顺序重写 priority（双写容错）
   const reorder = (from: number, to: number) => {
@@ -240,6 +245,8 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, apiKe
           // 组级命名与打标扩展
           const enhancedTag = (g.EnhancedTag ?? g.enhanced_tag ?? g.enhancedTag) === true;
           const nodePrefix = g.NodePrefix ?? g.node_prefix ?? g.nodePrefix ?? "";
+          // 统一命名：同组节点共用一个基础名，序号自动化
+          const unifyName = Boolean(g.UnifyName ?? g.unify_name ?? g.unifyName ?? false);
           const ispCheck = (g.ISPCheck ?? g.isp_check ?? g.ispCheck) === true;
 
           // 订阅源
@@ -530,8 +537,22 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, apiKe
                 )}
               </div>
 
-              {/* 组级命名与打标扩展：增强角标 / 节点名前缀 / ISP 类型检测 */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', padding: '10px 12px', background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+              {/* 组级命名与打标扩展：统一命名 / 增强角标 / 节点名前缀 / ISP 类型检测 */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', padding: '10px 12px', background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
+                {renameNode && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }} title="同组所有节点用同一个基础名，序号自动追加">
+                    统一命名
+                    <InfoTooltip
+                      title="统一命名 (Unify Name)"
+                      desc="开启后本组所有节点使用同一个基础名，由系统自动追加 -1 / -2 序号。"
+                      principle="丢弃国家角标等修饰，只保留基础名（优先取节点名前缀，其次取显示名，最后取组名），重名由改名阶段自动编号。"
+                      recommend="想要 mtf-1、mtf-2 这种整齐名字时开启；需要一眼看出节点地区时保持关闭。"
+                    />
+                  </span>
+                  <Switch checked={unifyName} onChange={(c) => updateGroup(idx, { UnifyName: c, unify_name: c })} />
+                </div>
+                )}
                 {renameNode && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                   <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }} title="显示 CF 状态角标：HK²=直连、HK¹⁺=CF同区、HK¹-US⁰=CF跨区">
@@ -884,15 +905,139 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, apiKe
                   <button onClick={() => copyLink(`${baseLink}/all.yaml${tokenQuery}`)} className="btn-ghost" title="仅纯节点列表，供第三方配置作 proxy-providers 引用">
                     <Copy size={13} /> 复制纯节点池
                   </button>
+                  <button onClick={() => toggleDetail(name)} className="btn-ghost" title="查看本组全部节点（含被禁用但可恢复的）">
+                    <Eye size={13} /> {openDetail === name ? "收起节点" : "查看节点"}
+                  </button>
                 </div>
                 <button onClick={() => deleteGroup(idx)} className="btn-danger" style={{ padding: '4px 8px' }}>
                   <Trash2 size={13} /> 删除分组
                 </button>
               </div>
+
+              {/* 节点明细面板：展开后就地显示本组节点，不遮挡上方的组配置 */}
+              {openDetail === name && (
+                <GroupNodesPanel groupName={name} />
+              )}
             </div>
           );
         })}
       </div>
+    </div>
+  );
+};
+
+// ---------- 组内节点明细面板 ----------
+// 就地展开在组卡片下方，不遮挡上方的组配置——用户改完配置能立刻对比节点变化。
+const STATE_META: Record<string, { label: string; color: string; icon: string }> = {
+  alive: { label: '活跃', color: 'var(--success)', icon: '✅' },
+  skipped: { label: '禁用·协议', color: 'var(--warning, #d97706)', icon: '⏸' },
+  slow: { label: '禁用·速度', color: 'var(--warning, #d97706)', icon: '⏸' },
+};
+
+const GroupNodesPanel: React.FC<{ groupName: string }> = ({ groupName }) => {
+  const { showToast } = useToast();
+  const [data, setData] = useState<NodesViewResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [stateFilter, setStateFilter] = useState<'all' | 'alive' | 'skipped' | 'slow'>('all');
+  const [keyword, setKeyword] = useState('');
+  const [page, setPage] = useState(0);
+  const PAGE = 50;
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    getNodesView(groupName)
+      .then((d) => { if (!cancelled) setData(d); })
+      .catch((e: any) => { if (!cancelled) { showToast(`加载节点失败: ${e.message}`, true); setData(null); } })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [groupName]);
+
+  const nodes = data?.nodes || [];
+  const filtered = nodes.filter((n) => {
+    if (stateFilter !== 'all' && n.state !== stateFilter) return false;
+    if (keyword) {
+      const k = keyword.toLowerCase();
+      const hit = n.name.toLowerCase().includes(k) || (n.server || '').toLowerCase().includes(k) || (n.raw_name || '').toLowerCase().includes(k);
+      if (!hit) return false;
+    }
+    return true;
+  });
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE));
+  const cur = Math.min(page, pageCount - 1);
+  const pageNodes = filtered.slice(cur * PAGE, (cur + 1) * PAGE);
+
+  return (
+    <div style={{ marginTop: '12px', borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
+      {/* 控制条 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '10px' }}>
+        <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+          {data ? `共 ${data.total} 个 · 活跃 ${data.alive} · 禁用 ${data.skipped + data.slow}` : '加载中…'}
+        </span>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+          <select value={stateFilter} onChange={(e) => { setStateFilter(e.target.value as any); setPage(0); }}
+            style={{ padding: '4px 8px', fontSize: '12px', background: 'var(--surface-1)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: '4px' }}>
+            <option value="all">全部状态</option>
+            <option value="alive">仅活跃</option>
+            <option value="skipped">仅协议禁用</option>
+            <option value="slow">仅速度禁用</option>
+          </select>
+          <input placeholder="搜索名称/原始名/服务器" value={keyword}
+            onChange={(e) => { setKeyword(e.target.value); setPage(0); }}
+            style={{ padding: '4px 8px', fontSize: '12px', background: 'var(--surface-1)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: '4px', width: '190px' }} />
+        </div>
+      </div>
+
+      {loading ? (
+        <div style={{ padding: '16px', textAlign: 'center', fontSize: '12px', color: 'var(--text-secondary)' }}>加载中…</div>
+      ) : !data || data.note ? (
+        <div style={{ padding: '16px', textAlign: 'center', fontSize: '12px', color: 'var(--text-secondary)' }}>
+          {data?.note || '暂无节点数据'}
+        </div>
+      ) : filtered.length === 0 ? (
+        <div style={{ padding: '16px', textAlign: 'center', fontSize: '12px', color: 'var(--text-secondary)' }}>没有符合筛选条件的节点</div>
+      ) : (
+        <>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+              <thead>
+                <tr style={{ background: 'var(--surface-1)', color: 'var(--text-secondary)' }}>
+                  {['状态', '名称', '原始名', '协议', '服务器', '速度'].map((h) => (
+                    <th key={h} style={{ textAlign: 'left', padding: '6px 10px', fontWeight: 500, whiteSpace: 'nowrap' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {pageNodes.map((n, i) => {
+                  const meta = STATE_META[n.state] || STATE_META.alive;
+                  return (
+                    <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
+                      <td style={{ padding: '5px 10px', whiteSpace: 'nowrap', color: meta.color }}>
+                        {meta.icon} {meta.label}
+                        {n.reason && <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>{n.reason}</div>}
+                      </td>
+                      <td style={{ padding: '5px 10px', wordBreak: 'break-all', maxWidth: '260px' }}>{n.name}</td>
+                      <td style={{ padding: '5px 10px', wordBreak: 'break-all', maxWidth: '260px', color: 'var(--text-secondary)' }}>{n.raw_name || '—'}</td>
+                      <td style={{ padding: '5px 10px', whiteSpace: 'nowrap' }}>{n.type}</td>
+                      <td style={{ padding: '5px 10px', wordBreak: 'break-all', maxWidth: '200px', color: 'var(--text-secondary)' }}>{n.server}{n.port ? `:${n.port}` : ''}</td>
+                      <td style={{ padding: '5px 10px', whiteSpace: 'nowrap', color: 'var(--text-secondary)' }}>{n.speed ? `${n.speed} KB/s` : '—'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {pageCount > 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '8px', fontSize: '11px', color: 'var(--text-secondary)' }}>
+              <span>第 {cur + 1} / {pageCount} 页 · 共 {filtered.length} 条</span>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <button className="btn-ghost" disabled={cur === 0} onClick={() => setPage(cur - 1)}>上一页</button>
+                <button className="btn-ghost" disabled={cur >= pageCount - 1} onClick={() => setPage(cur + 1)}>下一页</button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 };

@@ -116,6 +116,8 @@ export interface GroupItem {
   DownloadMB?: number;
   EnhancedTag?: boolean | null;
   NodePrefix?: string;
+  // 统一命名：同组节点共用一个基础名，序号自动追加
+  UnifyName?: boolean | null;
   ISPCheck?: boolean | null;
   // 健全容错兼容字段
   name?: string;
@@ -156,7 +158,9 @@ export interface GroupItem {
   downloadMB?: number;
   enhanced_tag?: boolean;
   enhancedTag?: boolean;
-  node_prefix?: string;
+  node_prefix?: string | null;
+  unify_name?: boolean | null;
+  unifyName?: boolean | null;
   nodePrefix?: string;
   isp_check?: boolean;
   ispCheck?: boolean;
@@ -264,6 +268,7 @@ export const getAnalysisReport = () => apiRequest<AnalysisReportResponse>("/api/
 // 节点明细：某组的全部节点（alive / skipped 协议禁用 / slow 速度禁用），不含凭据
 export interface NodeViewItem {
   name: string;
+  raw_name?: string;  // 重命名前的原始名（机场自己的命名，含 |标签 后缀）
   type: string;
   state: 'alive' | 'skipped' | 'slow';
   reason?: string;

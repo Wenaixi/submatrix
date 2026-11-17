@@ -187,6 +187,8 @@ type Config struct {
 	EnhancedTag           bool     `yaml:"enhanced-tag"`
 	SuccessLimit          int32    `yaml:"success-limit"`
 	NodePrefix            string   `yaml:"node-prefix"`
+	// UnifyName 全局默认的统一命名开关（组级可覆盖）
+	UnifyName             bool     `yaml:"unify-name"`
 	NodeType              []string `yaml:"node-type"`
 	NodeLoc               []string `yaml:"node-loc"`
 	EnableWebUI           bool     `yaml:"enable-web-ui"`

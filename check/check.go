@@ -1323,6 +1323,15 @@ func checkOnePlatform(job *ProxyJob, plat string, mediaClient *http.Client, db *
 
 // updateProxyName 更新代理名称
 func (pc *ProxyChecker) updateProxyName(res *Result, httpClient *ProxyClient, speed int, db *maxminddb.Reader, cfLoc string, cfIP string, jctx context.Context) {
+	// 先保存原始名：重命名会覆盖 name 字段，而前端「节点明细」需要展示
+	// 「这个节点原本叫什么」（含机场自定义的 |标签 后缀），
+	// 否则用户看到 mtf-1 完全不知道它原来对应哪个节点。
+	if orig, ok := res.Proxy["name"].(string); ok && orig != "" {
+		if _, exists := res.Proxy["raw_name"]; !exists {
+			res.Proxy["raw_name"] = orig
+		}
+	}
+
 	// 位置信息（国家/地区码/ISP 类型）按需获取：
 	// 重命名需要它，ISP 类型打标需要它，流媒体标签也要用它判断「节点地区 vs 解锁地区」
 	// 是否一致（不一致才加地区后缀）。三者任一开启就查一次，否则 res.Country 恒空，
@@ -1347,7 +1356,20 @@ func (pc *ProxyChecker) updateProxyName(res *Result, httpClient *ProxyClient, sp
 
 	// 以节点IP查询位置重命名（如果开启）
 	if pc.grp.RenameNode {
-		if res.Country != "" {
+		// 统一命名：同组所有节点用同一个基础名，序号交给 RenameDuplicateNodes 自动追加。
+		// 结果形如 mtf、mtf-1、mtf-2…… 整齐、可预测。
+		// 与 NodePrefix 的区别：前缀会保留国家角标（US²_mtf），
+		// 统一命名直接丢弃国家/角标，只留基础名。
+		if pc.grp.UnifyName {
+			base := strings.TrimSpace(pc.grp.NodePrefix)
+			if base == "" {
+				base = strings.TrimSpace(pc.grp.DisplayName)
+			}
+			if base == "" {
+				base = pc.grp.Name
+			}
+			res.Proxy["name"] = base
+		} else if res.Country != "" {
 			res.Proxy["name"] = pc.grp.NodePrefix + proxyutils.Rename(res.Country, res.CountryCodeTag, pc.grp.EnhancedTag)
 		} else {
 			// 位置确实取不到时：一律按未知处理，追加序号，绝不拼接原始名。
@@ -1463,8 +1485,13 @@ func (pc *ProxyChecker) updateProxyName(res *Result, httpClient *ProxyClient, sp
 		}
 	}
 
-	if tag, ok := res.Proxy["sub_tag"].(string); ok && tag != "" {
-		tags = append(tags, tag)
+	// sub_tag 后缀：统一命名时不追加。
+	// 统一命名的目标就是「名字整齐」，再拼 |MTF 这类来源标签就失去意义了；
+	// 来源信息在节点明细里由 raw_name / sub_tag 字段单独展示。
+	if !pc.grp.UnifyName {
+		if tag, ok := res.Proxy["sub_tag"].(string); ok && tag != "" {
+			tags = append(tags, tag)
+		}
 	}
 
 	// 运营商标签

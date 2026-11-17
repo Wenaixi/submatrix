@@ -415,6 +415,12 @@ func SaveGroup(grp config.ResolvedGroupConfig, results []check.Result, historyPo
 		}
 	}
 
+	// 1b. 名称唯一化：必须在 SuccessLimit 截取之前做。
+	// 统一命名（unify-name）下同组节点基础名完全相同，靠这一步自动追加 -1 / -2。
+	// 此前只有历史池做了唯一化，主产物从来没做，导致统一命名后一堆同名节点无法区分。
+	utils.RenameDuplicateNodes(proxiesList)
+	utils.RenameDuplicateNodes(rawList)
+
 	// 2. 单组节点上限（仅截取已检测列表，raw 全量保留）
 	if grp.SuccessLimit > 0 && len(proxiesList) > int(grp.SuccessLimit) {
 		slog.Info("单组节点上限生效", "组", grp.Name, "原数量", len(proxiesList), "截取后", grp.SuccessLimit)
@@ -496,6 +502,7 @@ func stripInternalState(n map[string]any) map[string]any {
 // 前端展示只需要状态、名称、协议、地区、速度这些无敏感信息。
 type nodeViewItem struct {
 	Name     string `json:"name"`
+	RawName  string `json:"raw_name,omitempty"` // 重命名前的原始名（机场自己的命名，含 |标签 后缀）
 	Type     string `json:"type"`
 	State    string `json:"state"`              // alive | skipped | slow
 	Reason   string `json:"reason,omitempty"`   // 软禁用原因（可恢复的提示）
@@ -540,6 +547,7 @@ func buildNodeViewPayload(groupName string, nodes []map[string]any) nodeViewPayl
 			State:    state,
 			Reason:   toStringField(n["_state_reason"]),
 			Name:     toStringField(n["name"]),
+			RawName:  toStringField(n["raw_name"]),
 			Type:     toStringField(n["type"]),
 			SERVER:   toStringField(n["server"]),
 			SubTag:   toStringField(n["sub_tag"]),
