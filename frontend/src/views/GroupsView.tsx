@@ -445,45 +445,17 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, apiKe
                   </div>
                 </>
               ) : (
-                /* 测活关闭：除智能改名外全部收起 (2A & 3A) */
+                /* 测活关闭（免检模式）：不显示任何探测/改名/后缀开关 */
                 <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
                   padding: '10px 12px',
                   background: 'var(--surface-1)',
-                  border: '1px solid var(--border)'
+                  border: '1px solid var(--border)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
                 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontSize: '12px', color: 'var(--text-primary)', display: 'inline-flex', alignItems: 'center' }}>
-                        智能改名
-                        <InfoTooltip
-                          title="智能改名 (Rename Node)"
-                          desc="根据节点 IP 归属地与协议，自动重命名为规范统一格式（如 🇭🇰HK_01|Tag）。"
-                          principle="匹配 MaxMind GeoIP 与内部正则，按国家代码、序号与组标签规范化命名。"
-                          recommend="保持开启，可使客户端中的节点列表整齐有序。"
-                        />
-                      </span>
-                      <Switch checked={renameNode} onChange={(c) => updateGroup(idx, { RenameNode: c, rename_node: c })} />
-                    </div>
-                    {renameNode && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', borderLeft: '1px solid var(--border)', paddingLeft: '16px' }}>
-                        <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }}>
-                          保留原名末尾
-                          <InfoTooltip
-                            title="保留原名末尾 (Append Original Name)"
-                            desc="在重命名后的节点末尾追加原始节点名称作为参考。"
-                            principle="在生成标准名称后拼接 (原名: xxx)，方便向上溯源初始订阅源。"
-                            recommend="默认关闭，保持节点名称极简清爽；排查上游源时可开启。"
-                          />
-                        </span>
-                        <Switch checked={appendOriginalName} onChange={(c) => updateGroup(idx, { AppendOriginalName: c, append_original_name: c })} />
-                      </div>
-                    )}
-                  </div>
                   <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                    免检模式仅提供文本正则智能改名，其余探测与丢弃功能已自动收起
+                    免检模式仅直连放行节点，探测、智能改名与丢弃功能均不生效
                   </span>
                 </div>
               )}
