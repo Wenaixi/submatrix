@@ -659,8 +659,6 @@ curl -s http://127.0.0.1:8199/static/dist/app.js | grep -c "<新功能的某个�
 
 关闭组的「启用连通测活」后，GroupsView 只显示基础字段（分组名/URL/开关主卡）
 和一行说明文字，**以下全部隐藏**：
-- 智能改名（RenameNode）
-- 保留原名末尾（AppendOriginalName）
 - 统一命名（UnifyName）
 - 增强位置角标（EnhancedTag）
 - 节点名前缀（NodePrefix）
@@ -668,7 +666,35 @@ curl -s http://127.0.0.1:8199/static/dist/app.js | grep -c "<新功能的某个�
 - 丢弃相关（DropOnFail）
 
 说明文字：免检模式仅直连放行节点，探测、智能改名与丢弃功能均不生效。
+（「智能改名」大开关已于 2026-11-21 移除，见第 22 节。）
 
-注意：智能改名开关本身只在测活开启分支里可改——用户想配改名须先开测活。
-若主人希望免检模式仍可单独配置改名，把 447 行附近的 else 分支恢复为
-仅保留「智能改名」开关即可。
+## 22. 改名链路：大开关已移除，子项独立生效（2026-11-21）
+
+### 现状
+「智能改名（RenameNode）」总开关已删除。改名行为由三个独立子项驱动，
+优先级 **UnifyName > EnhancedTag > NodePrefix**，全部关闭 = 保持原始名：
+
+| 子项 | 行为 |
+|---|---|
+| UnifyName | 基础名（NodePrefix \|\| DisplayName \|\| Name）+ 自动序号 |
+| EnhancedTag | 国旗+国家角标+序号（如 🇭🇰HK²_1\|Tag），唯一消费位置码 |
+| NodePrefix | 仅在原始名前加前缀（不改名、不查位置）|
+
+### 关键实现细节（改这块必看）
+1. **needLocInfo 触发条件**（check.go:1339）：
+   `ISPCheck || MediaCheck || (EnhancedTag && !UnifyName)`。
+   UnifyName/NodePrefix 纯拼串不需要位置查询，不查省一次网络往返。
+2. **迁移**（app/config_migrate.go rewriteRenameNode）：
+   `rename-node: true` → `enhanced-tag: true`；`false` → 删行。
+   **替换前先删同缩进的已有 enhanced-tag 行**（旧配置可能两个都有，防重复键）。
+3. **progress.go 的 renameActive**：用 ProgressTracker 的
+   `UnifyName||EnhancedTag||NodePrefix!==""`（组级），替代旧的
+   `config.GlobalConfig.RenameNode`（读全局而非组级，不一致）。
+4. **AppendOriginalName 已删除**：后端从无消费点（历史只剩注释说明
+   「国旗+原名滚雪球」叠字 bug），raw_name 字段承担溯源。
+5. 前端新组默认 `EnhancedTag: true`（与迁移一致，保默认改名体验）。
+
+### 验证手法
+- 端到端看产物节点名：enhanced-tag 时应为 `🇭🇰HK²_1|Tag` 格式；
+  UnifyName 时应为 `mtf-1` 格式；全关时保持原始名。
+- 迁移验证：config.yaml 里 `rename-node` 消失、`enhanced-tag` 唯一。
