@@ -27,6 +27,10 @@ type migrateConfigView struct {
 
 	KeepSuccessProxies *bool `yaml:"keep-success-proxies"`
 
+	// rename-node 是大开关，已被拆成 enhanced-tag / unify-name / node-prefix 独立子项。
+	// 这里仅用于检测旧配置是否存在，走 rewriteRenameNode 迁移。
+	RenameNode *bool `yaml:"rename-node"`
+
 	SubProcess struct {
 		ResolveDomain any `yaml:"resolve-domain"`
 	} `yaml:"sub-process"`
@@ -68,6 +72,18 @@ func (app *App) migrateConfig() error {
 		needWrite = true
 		migrated = append(migrated, "keep-success-proxies")
 		slog.Debug("keep-success-proxies 已迁移到新配置结构")
+	}
+
+	// rename-node（大开关）→ enhanced-tag / 删除
+	// 旧语义：rename-node: true = 开启智能改名（国旗+国家角标）。
+	// 迁移：true → enhanced-tag: true（沿用旧默认改名体验）；
+	//       false → 删除该行（子项独立生效，全部关闭=不改名，与旧行为一致）。
+	// 顶点与组内缩进都处理（rewriteRenameNode 按行匹配，保留原缩进）。
+	if view.RenameNode != nil {
+		content = rewriteRenameNode(content, *view.RenameNode)
+		needWrite = true
+		migrated = append(migrated, "rename-node")
+		slog.Info("rename-node 已迁移为独立子项（enhanced-tag/unify-name/node-prefix）")
 	}
 
 	// 自动升级 singbox-latest 到 1.14（支持 v1/v2）
@@ -505,5 +521,56 @@ func rewriteKeepSuccessProxies(content string, oldValue bool) string {
 		}
 	}
 
+	return content
+}
+
+// rewriteRenameNode 把旧大开关 rename-node 迁移到独立子项：
+//   - oldValue=true  → 该行替换为同缩进的 enhanced-tag: true（沿用「默认改名」体验）
+//   - oldValue=false → 删除该行（及紧邻上方的注释）
+//
+// 替换前先移除同缩进的已有 enhanced-tag 行：旧配置可能同时有
+// `rename-node: true` 与手动开过的 `enhanced-tag: true`，不删会写出重复键。
+//
+// 按行匹配 + 保留缩进，因此顶层与组内（如 groups: 下的嵌套）都能正确处理。
+func rewriteRenameNode(content string, oldValue bool) string {
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "rename-node:") {
+			continue
+		}
+
+		start := i
+		// 回溯删除紧邻上方的注释（与 rewriteKeepSuccessProxies 一致）
+		for start > 0 {
+			prev := strings.TrimSpace(lines[start-1])
+			if strings.HasPrefix(prev, "#") || prev == "" {
+				start--
+				continue
+			}
+			break
+		}
+
+		// 保留原缩进
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		keyIndent := strings.Repeat(" ", indent)
+
+		// 收集替换后的行：跳过同缩进的已存在 enhanced-tag（防重复键）
+		var out []string
+		out = append(out, lines[:start]...)
+		if oldValue {
+			out = append(out, keyIndent+"enhanced-tag: true")
+		}
+		for j := i + 1; j < len(lines); j++ {
+			t := strings.TrimSpace(lines[j])
+			if strings.HasPrefix(t, "enhanced-tag:") &&
+				len(lines[j])-len(strings.TrimLeft(lines[j], " \t")) == indent {
+				continue // 跳过重复键
+			}
+			out = append(out, lines[j])
+		}
+
+		return strings.Join(out, "\n")
+	}
 	return content
 }

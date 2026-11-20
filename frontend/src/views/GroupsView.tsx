@@ -106,10 +106,8 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, apiKe
         check_alive: true,
         CheckSpeed: false,
         check_speed: false,
-        RenameNode: true,
-        rename_node: true,
-        AppendOriginalName: false,
-        append_original_name: false,
+        EnhancedTag: true,
+        enhanced_tag: true,
         MediaCheck: false,
         media_check: false,
         DropOnFail: true,
@@ -228,11 +226,8 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, apiKe
           // 基础 4 项开关
           const checkAlive = (g.CheckAlive ?? g.check_alive ?? g.checkAlive) !== false;
           const checkSpeed = (g.CheckSpeed ?? g.check_speed ?? g.checkSpeed) === true;
-          const renameNode = (g.RenameNode ?? g.rename_node ?? g.renameNode) !== false;
           const dropOnFail = (g.DropOnFail ?? g.drop_on_fail ?? g.dropOnFail) !== false;
 
-          // 高阶 3 项质检打标开关 (前作核心回归)
-          const appendOriginalName = Boolean(g.AppendOriginalName ?? g.append_original_name ?? g.appendOriginalName ?? false);
           const mediaCheck = (g.MediaCheck ?? g.media_check ?? g.mediaCheck) === true;
 
           // 参数与门槛
@@ -371,18 +366,6 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, apiKe
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                       <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }}>
-                        智能改名
-                        <InfoTooltip
-                          title="智能改名 (Rename Node)"
-                          desc="根据节点 IP 归属地与协议，自动重命名为规范统一格式（如 🇭🇰HK_01|Tag）。"
-                          principle="匹配 MaxMind GeoIP 与内部正则，按国家代码、序号与组标签规范化命名。"
-                          recommend="保持开启，可使客户端中的节点列表整齐有序。"
-                        />
-                      </span>
-                      <Switch checked={renameNode} onChange={(c) => updateGroup(idx, { RenameNode: c, rename_node: c })} />
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }}>
                         失败丢弃
                         <InfoTooltip
                           title="失败丢弃 (Drop On Fail)"
@@ -395,10 +378,10 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, apiKe
                     </div>
                   </div>
 
-                  {/* 高阶打标与画像开关 (含智能改名伴生的保留原名 3A) */}
+                  {/* 高阶打标与画像开关 */}
                   <div style={{
                     display: 'grid',
-                    gridTemplateColumns: renameNode ? 'repeat(3, 1fr)' : 'repeat(2, 1fr)',
+                    gridTemplateColumns: 'repeat(2, 1fr)',
                     gap: '8px',
                     padding: '10px 12px',
                     background: 'var(--surface-1)',
@@ -410,7 +393,7 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, apiKe
                         <InfoTooltip
                           title="ISP 类型打标 (ISP Check)"
                           desc="检测并标记节点的出口网络类型（如 |家宽、|机房 或 |移动）。"
-                          principle="开启后会查询节点出口 IP 的归属组织与网络属性；与「智能改名」各自独立生效。"
+                          principle="开启后会查询节点出口 IP 的归属组织与网络属性；独立生效，无需先开启改名。"
                           recommend="对流媒体或游戏防封有特定需求（如需要住宅 IP）时开启。"
                         />
                       </span>
@@ -428,20 +411,6 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, apiKe
                       </span>
                       <Switch checked={mediaCheck} onChange={(c) => updateGroup(idx, { MediaCheck: c, media_check: c })} />
                     </div>
-                    {renameNode && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }} title="在重命名后的节点末尾追加 (原名: xxx)">
-                          保留原名末尾
-                          <InfoTooltip
-                            title="保留原名末尾 (Append Original Name)"
-                            desc="在重命名后的节点末尾追加原始节点名称作为参考。"
-                            principle="在生成标准名称后拼接 (原名: xxx)，方便向上溯源初始订阅源。"
-                            recommend="默认关闭，保持节点名称极简清爽；排查上游源时可开启。"
-                          />
-                        </span>
-                        <Switch checked={appendOriginalName} onChange={(c) => updateGroup(idx, { AppendOriginalName: c, append_original_name: c })} />
-                      </div>
-                    )}
                   </div>
                 </>
               ) : (
@@ -509,9 +478,12 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, apiKe
                 )}
               </div>
 
-              {/* 组级命名与打标扩展：统一命名 / 增强角标 / 节点名前缀 / ISP 类型检测 */}
+              {/* 组级命名与打标扩展：统一命名 / 增强角标 / 节点名前缀。
+                  每个子项独立生效（已移除「智能改名」大开关）。
+                  免检模式（checkAlive=false）下隐藏：直通路径不执行改名，
+                  显示这些开关只会误导。 */}
+              {checkAlive && (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', padding: '10px 12px', background: 'var(--surface-1)', border: '1px solid var(--border)' }}>
-                {renameNode && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                   <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }} title="同组所有节点用同一个基础名，序号自动追加">
                     统一命名
@@ -524,28 +496,24 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, apiKe
                   </span>
                   <Switch checked={unifyName} onChange={(c) => updateGroup(idx, { UnifyName: c, unify_name: c })} />
                 </div>
-                )}
-                {renameNode && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                   <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center' }} title="显示 CF 状态角标：HK²=直连、HK¹⁺=CF同区、HK¹-US⁰=CF跨区">
                     增强位置角标
                     <InfoTooltip
                       title="增强位置角标 (Enhanced Tag)"
-                      desc="在重命名后的节点名上补充 Cloudflare 状态角标，一眼分辨节点与 CF 的相对位置。"
-                      principle="依据节点域名解析出的 CF 边缘机房与节点自身地区做比对，按直连/同区/跨区三种关系生成上标。"
-                      recommend="走 Cloudflare 加速的节点建议开启；纯直连自建节点可关闭以保持名字简洁。"
+                      desc="把节点重命名为 国旗+国家+序号（如 🇭🇰HK_01），并可补充 Cloudflare 状态角标。"
+                      principle="依据节点 IP 归属地生成国旗与国家码，按 CF 边缘机房关系生成上标。"
+                      recommend="想要国旗+国家格式的名字时开启；只填前缀或只想用统一命名时可关闭。"
                     />
                   </span>
                   <Switch checked={enhancedTag} onChange={(c) => updateGroup(idx, { EnhancedTag: c, enhanced_tag: c })} />
                 </div>
-                )}
-                {renameNode && (
                 <div>
                   <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', marginBottom: '3px' }}>
                     节点名前缀
                     <InfoTooltip
                       title="节点名前缀 (Node Prefix)"
-                      desc="给本组所有重命名后的节点加一段统一前缀，方便在客户端里成组识别。"
+                      desc="给本组所有节点加一段统一前缀。单独开启时只在原始名前加前缀；与增强角标或统一命名搭配时前缀在前。"
                       principle="改名阶段先生成标准名称，再在名称最前方拼接该前缀字符串。"
                       recommend="如填写“免费|”或“专线|”；留空表示不加前缀。"
                     />
@@ -557,8 +525,8 @@ export const GroupsView: React.FC<GroupsViewProps> = ({ groups, setGroups, apiKe
                     onChange={(e) => updateGroup(idx, { NodePrefix: e.target.value, node_prefix: e.target.value })}
                   />
                 </div>
-                )}
               </div>
+              )}
 
               <details style={{ border: '1px solid var(--border)', background: 'var(--surface-1)' }}>
                 <summary style={{ padding: '8px 12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', userSelect: 'none' }}>

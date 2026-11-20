@@ -250,7 +250,7 @@ func NewProxyChecker(proxyCount int, grp config.ResolvedGroupConfig) *ProxyCheck
 		mediaConc = 1
 	}
 
-	return &ProxyChecker{
+	pc := &ProxyChecker{
 		proxyCount:  proxyCount,
 		threadCount: threadCount,
 		grp:         grp,
@@ -271,6 +271,10 @@ func NewProxyChecker(proxyCount int, grp config.ResolvedGroupConfig) *ProxyCheck
 		historyChan: make(chan map[string]any, proxyCount), // 缓冲设为最大值防止阻塞
 		HistoryPool: make([]map[string]any, 0),
 	}
+	// 记录本轮是否有重命名子项生效（组级，替代旧的全局 RenameNode 判断）
+	pc.pt.SetRenameActive(grp.UnifyName || grp.EnhancedTag || strings.TrimSpace(grp.NodePrefix) != "")
+
+	return pc
 }
 
 // CheckGroup 按单个组的配置执行代理检测
@@ -1336,7 +1340,15 @@ func (pc *ProxyChecker) updateProxyName(res *Result, httpClient *ProxyClient, sp
 	// 重命名需要它，ISP 类型打标需要它，流媒体标签也要用它判断「节点地区 vs 解锁地区」
 	// 是否一致（不一致才加地区后缀）。三者任一开启就查一次，否则 res.Country 恒空，
 	// YT/GM/TK 标签会因 `region != ""` 而恒带地区后缀。
-	needLocInfo := pc.grp.RenameNode || pc.grp.ISPCheck || pc.grp.MediaCheck
+	// 位置信息查询触发条件：只有真正需要国家/地区码的选项才查。
+	// - ISPCheck：ISP 标签需要
+	// - MediaCheck：流媒体标签需要判断「节点地区 vs 解锁地区」
+	// - EnhancedTag：国旗+角标需要位置码（唯一消费它的改名分支）
+	// UnifyName / NodePrefix 纯本地拼串，不需要位置——不查，省一次网络往返。
+	// 注意 EnhancedTag && !UnifyName：UnifyName 优先于 EnhancedTag，
+	// 走到 EnhancedTag 分支时 UnifyName 必为 false。
+	needLocInfo := pc.grp.ISPCheck || pc.grp.MediaCheck ||
+		(pc.grp.EnhancedTag && !pc.grp.UnifyName)
 	if needLocInfo && res.Country == "" {
 		// 使用 MediaCheckTimeout 替换默认的短超时
 		locTimeout := config.GlobalConfig.MediaCheckTimeout
@@ -1354,29 +1366,34 @@ func (pc *ProxyChecker) updateProxyName(res *Result, httpClient *ProxyClient, sp
 		res.ISPTag = ispTag
 	}
 
-	// 以节点IP查询位置重命名（如果开启）
-	if pc.grp.RenameNode {
+	// 原始名局部捕获：纯前缀分支（NodePrefix）不改名、只加前缀时使用。
+	// raw_name 已在上方保存，这里避免重复从 map 读取。
+	origName, _ := res.Proxy["name"].(string)
+
+	// 节点重命名：各子项独立生效，无总开关（已移除 RenameNode 大开关）。
+	// 优先级：UnifyName > EnhancedTag > NodePrefix。全部关闭 = 保持原始名。
+	// 注意：免检路径与协议过滤路径绕过本函数，因此这几个子项对它们本就零生效。
+	switch {
+	case pc.grp.UnifyName:
 		// 统一命名：同组所有节点用同一个基础名，序号交给 RenameDuplicateNodes 自动追加。
 		// 结果形如 mtf、mtf-1、mtf-2…… 整齐、可预测。
-		// 与 NodePrefix 的区别：前缀会保留国家角标（US²_mtf），
-		// 统一命名直接丢弃国家/角标，只留基础名。
-		if pc.grp.UnifyName {
-			base := strings.TrimSpace(pc.grp.NodePrefix)
-			if base == "" {
-				base = strings.TrimSpace(pc.grp.DisplayName)
-			}
-			if base == "" {
-				base = pc.grp.Name
-			}
-			res.Proxy["name"] = base
-		} else if res.Country != "" {
-			res.Proxy["name"] = pc.grp.NodePrefix + proxyutils.Rename(res.Country, res.CountryCodeTag, pc.grp.EnhancedTag)
-		} else {
-			// 位置确实取不到时：一律按未知处理，追加序号，绝不拼接原始名。
-			// 原始实现会无条件拼接 originName，导致「国旗+原始名滚雪球」的怪名叠字；
-			// append-original-name 开关在此没有消费方（上游行为），这里直接放弃拼接。
-			res.Proxy["name"] = pc.grp.NodePrefix + proxyutils.Rename("", "", pc.grp.EnhancedTag)
+		// 与 EnhancedTag 的区别：统一命名丢弃国家/角标，只留基础名。
+		base := strings.TrimSpace(pc.grp.NodePrefix)
+		if base == "" {
+			base = strings.TrimSpace(pc.grp.DisplayName)
 		}
+		if base == "" {
+			base = pc.grp.Name
+		}
+		res.Proxy["name"] = base
+	case pc.grp.EnhancedTag:
+		// 国旗 + 国家角标 + 序号（唯一消费位置码的分支）。
+		// 位置取不到时维持现有行为：Rename("","",true) → 🏴‍☠_N
+		res.Proxy["name"] = strings.TrimSpace(pc.grp.NodePrefix) +
+			proxyutils.Rename(res.Country, res.CountryCodeTag, true)
+	case strings.TrimSpace(pc.grp.NodePrefix) != "":
+		// 纯前缀：不改名、不查位置，仅在原始名前加前缀。
+		res.Proxy["name"] = strings.TrimSpace(pc.grp.NodePrefix) + origName
 	}
 
 	name := ""

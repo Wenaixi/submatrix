@@ -43,7 +43,22 @@ type ProgressTracker struct {
 	// 确保进度条输出完成
 	finalized atomic.Bool
 
+	// renameActive 记录本轮检测是否有任一重命名子项生效（UnifyName/EnhancedTag/NodePrefix）。
+	// 替代旧的 config.GlobalConfig.RenameNode——那个读的是全局而非组级，不一致。
+	renameActive atomic.Bool
+
 	finishAliveOnce sync.Once
+}
+
+// SetRenameActive 记录本轮是否有任一重命名子项生效。
+// 替代旧的 config.GlobalConfig.RenameNode（那是全局而非组级，不一致）。
+func (pt *ProgressTracker) SetRenameActive(active bool) {
+	pt.renameActive.Store(active)
+}
+
+// RenameActive 返回本轮重命名子项是否生效。
+func (pt *ProgressTracker) RenameActive() bool {
+	return pt.renameActive.Load()
 }
 
 // NewProgressTracker 初始化进度追踪器并重置外部原子变量。
@@ -132,7 +147,7 @@ func (pt *ProgressTracker) FinishAliveStage() {
 			pt.currentStage.Store(2) // 跳过测速，直接进入媒体检测阶段
 		}
 
-		if !speedON && !mediaON && config.GlobalConfig.RenameNode {
+		if !speedON && !mediaON && pt.renameActive.Load() {
 			pt.currentStage.Store(-1)
 		}
 
@@ -143,7 +158,7 @@ func (pt *ProgressTracker) FinishAliveStage() {
 // FinishSpeedStage 在所有速度测试完成后，将追踪器转换到媒体检测阶段。
 func (pt *ProgressTracker) FinishSpeedStage() {
 	if !mediaON {
-		if config.GlobalConfig.RenameNode {
+		if pt.renameActive.Load() {
 			pt.currentStage.Store(-1)
 		}
 		pt.refresh()

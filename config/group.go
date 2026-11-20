@@ -59,7 +59,6 @@ type ResolvedGroupConfig struct {
 	MinSpeed           int
 	MediaCheck         bool
 	TagIPType          bool
-	RenameNode         bool
 	AppendOriginalName bool
 	EnhancedTag        bool
 	DropOnFail         bool
@@ -127,7 +126,6 @@ func ResolveGroup(g GroupConfig, global Config) ResolvedGroupConfig {
 		MediaCheck:         global.MediaCheck,
 		TagIPType:          global.TagIPType,
 		Priority:           g.Priority,
-		RenameNode:         global.RenameNode,
 		AppendOriginalName: global.AppendOriginalName,
 		EnhancedTag:        global.EnhancedTag,
 		DropOnFail:         true,
@@ -164,9 +162,6 @@ func ResolveGroup(g GroupConfig, global Config) ResolvedGroupConfig {
 	}
 	if g.TagIPType != nil {
 		res.TagIPType = *g.TagIPType
-	}
-	if g.RenameNode != nil {
-		res.RenameNode = *g.RenameNode
 	}
 	if g.AppendOriginalName != nil {
 		res.AppendOriginalName = *g.AppendOriginalName
@@ -227,7 +222,6 @@ func ResolveAllGroups(global Config) []ResolvedGroupConfig {
 				DropOnFail:         true,
 				MediaCheck:         global.MediaCheck,
 				TagIPType:          global.TagIPType,
-				RenameNode:         global.RenameNode,
 				AppendOriginalName: global.AppendOriginalName,
 				EnhancedTag:        global.EnhancedTag,
 				RulePreset:         RulePresetACL4SSR,
